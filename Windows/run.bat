@@ -187,23 +187,23 @@ if %errorLevel% equ 0 (
 )
 
 :ollama_found
-if %OLLAMA_FOUND% equ 1 (
-    echo [+] Ollama ready.
-    :: Check if model is available, pull if not
-    echo [*] Checking for qwen2.5:7b model...
-    ollama list 2>nul | findstr /C:"qwen2.5:7b" >nul
-    if %errorLevel% neq 0 (
-        echo [*] Pulling qwen2.5:7b model (this may take a few minutes)...
-        ollama pull qwen2.5:7b
-        if %errorLevel% equ 0 (
-            echo [+] Model downloaded successfully!
-        ) else (
-            echo [!] Failed to pull model. The app will try again when needed.
-        )
-    ) else (
-        echo [+] Model qwen2.5:7b ready.
-    )
+if %OLLAMA_FOUND% neq 1 goto :skip_ollama_model
+echo [+] Ollama ready.
+:: Check if model is available, pull if not
+echo [*] Checking for qwen2.5:7b model...
+ollama list 2>nul | findstr /C:"qwen2.5:7b" >nul
+if %errorLevel% equ 0 (
+    echo [+] Model qwen2.5:7b ready.
+    goto :skip_ollama_model
 )
+echo [*] Pulling qwen2.5:7b model - this may take a few minutes...
+ollama pull qwen2.5:7b
+if %errorLevel% equ 0 (
+    echo [+] Model downloaded successfully!
+) else (
+    echo [!] Failed to pull model. The app will try again when needed.
+)
+:skip_ollama_model
 echo.
 
 :: Check for PowerShell 7 (required for Zero Trust and Azure Inventory tabs)
