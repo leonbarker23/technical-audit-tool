@@ -246,3 +246,12 @@ See `Windows/requirements.txt` for Python packages.
 - `qwen2.5:14b` needs ~10 GB RAM; Windows uses smaller `qwen2.5:7b`
 - Network scans are unauthenticated discovery only
 - M365 Assessment tab not yet implemented
+
+---
+
+## Changelog
+
+### 2026-02-06
+- Fixed Windows `run.bat` batch file syntax error (nested if statements in Ollama section)
+- Added browser auto-launch with 5-second delay fallback
+- Both Mac and Windows versions now fully functional with all 4 tabs
