@@ -312,6 +312,15 @@ See `Windows/requirements.txt` for Python packages.
 
 ## Changelog
 
+### 2026-02-06 (Update 5)
+- **M365 Assessment mirrored to Windows** — Full implementation now available on both platforms
+  - Added `m365assessment.ps1` to Windows folder
+  - Added `/m365assessment` route and `_m365assessment_prompt()` to Windows `app.py`
+  - Replaced placeholder M365 tab with full UI implementation
+  - Windows uses `qwen2.5:7b` model (smaller than macOS `qwen2.5:14b`)
+- **Changed Azure Inventory tab icon** — Now uses 📊 (chart) instead of ☁️ (cloud) to differentiate from M365 Assessment
+- **Updated run.bat** — PowerShell 7 requirement message now includes M365 Assessment
+
 ### 2026-02-06 (Update 4)
 - **Added Security & Compliance connection** — Enables compliance-related Maester tests via `Connect-IPPSSession`
 - **Fixed Teams module assembly conflict** — Teams module now loads BEFORE Exchange to avoid MSAL version conflicts
