@@ -200,7 +200,7 @@ if %errorLevel% equ 0 (
 :skip_ollama_model
 echo.
 
-:: Check for PowerShell 7 (required for Zero Trust and Azure Inventory tabs)
+:: Check for PowerShell 7 (required for M365, Zero Trust, and Azure Inventory tabs)
 echo [*] Checking PowerShell 7...
 set PWSH_FOUND=0
 where pwsh >nul 2>&1
@@ -214,7 +214,7 @@ if exist "C:\Program Files\PowerShell\7\pwsh.exe" (
 )
 
 :: PowerShell 7 not found - try to install
-echo [!] PowerShell 7 not found. Required for Zero Trust and Azure Inventory.
+echo [!] PowerShell 7 not found. Required for M365, Zero Trust, and Azure Inventory.
 powershell -Command "Get-Command winget -ErrorAction SilentlyContinue" >nul 2>&1
 if %errorLevel% equ 0 (
     echo [*] Installing PowerShell 7 via winget...
@@ -224,12 +224,12 @@ if %errorLevel% equ 0 (
         set PWSH_FOUND=1
     ) else (
         echo [!] Failed to install PowerShell 7.
-        echo     Zero Trust and Azure Inventory tabs will not work.
+        echo     M365, Zero Trust, and Azure Inventory tabs will not work.
         echo     Install manually: https://aka.ms/powershell-release?tag=stable
     )
 ) else (
     echo [!] winget not available. PowerShell 7 not installed.
-    echo     Zero Trust and Azure Inventory tabs will not work.
+    echo     M365, Zero Trust, and Azure Inventory tabs will not work.
     echo     Install manually: https://aka.ms/powershell-release?tag=stable
 )
 
