@@ -27,3 +27,6 @@ venv/
 
 # Logs
 *.log
+
+# My files
+git_cheatsheet.md

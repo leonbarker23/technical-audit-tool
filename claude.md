@@ -11,7 +11,7 @@ A comprehensive assessment suite for MSP technical consultants performing IT aud
 | Tab | Status | Description |
 |-----|--------|-------------|
 | **Network Discovery** | Implemented | Network vulnerability scanning with nmap, live log output, AI-generated reports |
-| **M365 Assessment** | Placeholder | Microsoft 365 tenant configuration review |
+| **M365 Assessment** | Implemented | Microsoft 365 tenant assessment with Maester security tests and Graph API data |
 | **Azure Inventory (ARI)** | Implemented | Azure Resource Inventory with Excel reports, network diagrams, AI analysis |
 | **Zero Trust Assessment** | Implemented | Microsoft 365 Zero Trust security assessment with ~168 tests |
 
@@ -35,6 +35,7 @@ Both Mac and Windows versions share identical functionality. The table below sho
 | `scan.py` | Network scanning engine — nmap wrapper, XML parser, LLM prompts |
 | `app.py` | Flask web server — SSE streaming, routes for all assessments |
 | `templates/index.html` | Single-page UI with tabbed interface |
+| `m365assessment.ps1` | PowerShell script for M365 data collection via Graph API + Maester |
 | `zerotrust.ps1` | PowerShell script for Zero Trust data collection via Microsoft Graph |
 | `azureinventory.ps1` | PowerShell script for Azure Resource Inventory via ARI module |
 | `requirements.txt` | Python dependencies (`flask`, `ollama`) |
@@ -44,7 +45,7 @@ Both Mac and Windows versions share identical functionality. The table below sho
 ## Features
 
 ### Stop Button
-Network Discovery, Azure Inventory, and Zero Trust tabs have a stop button that appears during active scans/assessments. The backend tracks active processes by session ID and kills them on request.
+All tabs have a stop button that appears during active scans/assessments. The backend tracks active processes by session ID and kills them on request.
 
 ### Parallel Execution
 Assessments can run in parallel — you can run a Zero Trust assessment while also running a Network Discovery scan. Flask runs with `threaded=True` to support concurrent requests.
@@ -71,6 +72,67 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
 ### Files Generated
 - `<client>_<target>_<timestamp>.json` — Raw scan data
 - `<client>_<target>_<timestamp>.md` — AI-generated report
+
+---
+
+## M365 Assessment
+
+### Prerequisites
+- **PowerShell 7** — Install on Mac: `brew install powershell`
+- **Microsoft.Graph modules** — Auto-installed:
+  - Microsoft.Graph.Authentication
+  - Microsoft.Graph.Users
+  - Microsoft.Graph.Identity.SignIns
+  - Microsoft.Graph.Identity.DirectoryManagement
+  - Microsoft.Graph.Reports
+  - Microsoft.Graph.Security
+  - Microsoft.Graph.Applications
+  - Microsoft.Graph.DeviceManagement
+  - Microsoft.Graph.Sites
+  - Microsoft.Graph.Groups
+- **Maester module** — Auto-installed from PSGallery
+- **ExchangeOnlineManagement module** — Auto-installed (for Exchange and S&C tests)
+- **MicrosoftTeams module** — Auto-installed (for Teams tests)
+- **Microsoft 365 credentials** — Global Reader or Global Admin
+
+### How it works
+1. User enters client name and optionally skips Maester tests
+2. Flask executes `m365assessment.ps1` via PowerShell 7
+3. **Authentication (4 prompts when Maester enabled)**:
+   - Microsoft Graph (device code) — all Graph API scopes including PIM
+   - Microsoft Teams (device code) — loaded first to avoid MSAL conflicts
+   - Exchange Online (device code) — for Exchange-related tests
+   - Security & Compliance (browser) — for compliance tests
+4. **Graph API data collection**:
+   - Licensing: Subscribed SKUs, user counts, guest users
+   - Security Score: Current/max score, percentage, top 10 recommendations
+   - Identity: CA policies, MFA status, SSPR, privileged access, risky users
+   - Intune: Compliance policies, configuration profiles, managed devices, app protection
+   - SharePoint: Storage usage, site count
+   - Teams: Team count
+   - Applications: Enterprise apps, app registrations
+   - Governance: Admin role breakdown, named locations
+5. **Maester security tests** (optional):
+   - Runs comprehensive M365 security tests across all connected services
+   - Generates interactive HTML report
+   - Exports detailed JSON and Markdown results
+6. AI (Ollama) analyses all data INCLUDING the Maester markdown report
+7. Report focuses on MSP value: project opportunities, license upsells, managed services
+
+### Options
+- **Skip Maester Tests** — Skips Maester security tests (unchecked by default, Maester runs)
+
+### Duration
+- Small tenants (<100 users): 8-12 minutes (with all connections)
+- Medium tenants (100-1000 users): 12-18 minutes
+- Large tenants (1000+ users): 18-25 minutes
+
+### Files Generated
+- `m365assessment_YYYY-MM-DD_HH-MM.json` — Raw Graph API assessment data
+- `m365assessment_report_YYYY-MM-DD_HH-MM.md` — AI-generated summary report
+- `MaesterTests/MaesterReport.html` — Interactive Maester security test report
+- `MaesterTests/MaesterReport.json` — Raw Maester test results
+- `MaesterTests/MaesterReport.md` — Markdown report (used by AI for analysis)
 
 ---
 
@@ -203,7 +265,7 @@ brew install mono-libgdiplus
 | Package | Purpose |
 |---------|---------|
 | `nmap` | Network scanning for Network Discovery tab |
-| `powershell` | PowerShell 7 for Azure Inventory and Zero Trust scripts |
+| `powershell` | PowerShell 7 for Azure Inventory, M365 Assessment, and Zero Trust scripts |
 | `mono-libgdiplus` | GDI+ library for Excel column auto-sizing in ImportExcel module |
 
 #### Ollama (AI)
@@ -245,13 +307,40 @@ See `Windows/requirements.txt` for Python packages.
 
 - `qwen2.5:14b` needs ~10 GB RAM; Windows uses smaller `qwen2.5:7b`
 - Network scans are unauthenticated discovery only
-- M365 Assessment tab not yet implemented
 
 ---
 
 ## Changelog
 
+### 2026-02-06 (Update 4)
+- **Added Security & Compliance connection** — Enables compliance-related Maester tests via `Connect-IPPSSession`
+- **Fixed Teams module assembly conflict** — Teams module now loads BEFORE Exchange to avoid MSAL version conflicts
+- **Added RoleEligibilitySchedule.ReadWrite.Directory scope** — Enables PIM eligible role queries for global admin tests
+- **LLM now reads Maester markdown report** — Full security test report included in AI analysis
+- **Revised LLM prompt for MSP focus** — Now emphasises:
+  - Project opportunities and remediation work
+  - License upsell recommendations
+  - Managed services value proposition
+  - Themes and patterns instead of listing individual test results
+- Four authentication prompts: Graph API, Teams, Exchange, Security & Compliance
+
+### 2026-02-06 (Update 3)
+- **Added Exchange Online and Teams modules for Maester** — Enables Exchange and Teams security tests
+  - Three authentication prompts: Graph API, Exchange Online, Teams
+  - All connections are read-only (no write permissions)
+  - Modules auto-install if missing
+- **Proper service disconnection** — Now disconnects from all three services on completion
+
+### 2026-02-06 (Update 2)
+- **Fixed M365 Assessment Maester permission errors** — Now uses `Connect-MgGraph` with all Maester-required scopes upfront, then runs `Invoke-Maester -SkipGraphConnect` to use the existing connection
+- **Fixed SharePoint data collection on macOS** — The script now uses cross-platform temp directory detection (`$env:TMPDIR` or `/tmp` on macOS instead of `$env:TEMP`)
+- **Fixed Maester test folder conflict** — Clears existing test files before installing fresh ones
+
 ### 2026-02-06
+- **M365 Assessment tab implemented** — Graph API + Maester hybrid approach
+  - Collects licensing, Secure Score, CA policies, MFA status, Intune, SharePoint, Teams data
+  - Optional Maester security tests with HTML/JSON reports
+  - AI-generated comprehensive tenant analysis
 - Fixed Windows `run.bat` batch file syntax error (nested if statements in Ollama section)
 - Added browser auto-launch with 5-second delay fallback
-- Both Mac and Windows versions now fully functional with all 4 tabs
+- All 4 tabs now fully functional on both Mac and Windows

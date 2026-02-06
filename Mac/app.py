@@ -772,6 +772,446 @@ Summarise key takeaways and next steps for the MSP engagement.
 Be specific - reference actual resource counts and types. Use blank lines for readability."""
 
 
+# ── M365 Assessment ───────────────────────────────────────────────────────────
+
+@app.route("/m365assessment")
+def m365assessment():
+    client = request.args.get("client", "").strip()
+    session_id = request.args.get("session", "").strip()
+    skip_maester = request.args.get("skipMaester", "").lower() == "true"
+
+    if not client or not _CLIENT_RE.match(client):
+        return Response(sse("Invalid or missing client name.", event="m365_error"),
+                        mimetype="text/event-stream")
+
+    def generate():
+        import shutil
+        from datetime import datetime
+
+        # Check for PowerShell
+        pwsh_path = shutil.which("pwsh")
+        if not pwsh_path:
+            yield sse("PowerShell 7 (pwsh) not found.", event="m365_error")
+            yield sse("Install with: brew install powershell", event="m365_error")
+            return
+
+        yield sse("[*] PowerShell 7 found: " + pwsh_path)
+        yield sse("[*] Client: " + client)
+        yield sse("")
+
+        # Create client folder if needed
+        client_folder = os.path.join(BASE_DIR, client)
+        os.makedirs(client_folder, exist_ok=True)
+
+        # Run the M365 Assessment PowerShell script
+        script_path = os.path.join(BASE_DIR, "m365assessment.ps1")
+        if not os.path.exists(script_path):
+            yield sse("m365assessment.ps1 script not found.", event="m365_error")
+            return
+
+        yield sse("[*] Running M365 Assessment...")
+        yield sse("[*] A browser window will open for Microsoft authentication")
+        yield sse("")
+
+        cmd = [
+            pwsh_path, "-NoProfile", "-ExecutionPolicy", "Bypass",
+            "-File", script_path,
+            "-OutputPath", BASE_DIR,
+            "-ClientName", client
+        ]
+
+        if skip_maester:
+            cmd.append("-SkipMaester")
+
+        proc = None
+        json_file = None
+        maester_html_file = None
+        maester_json_file = None
+        maester_md_file = None
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=BASE_DIR
+            )
+
+            # Register process for stop functionality
+            if session_id:
+                _active_processes[session_id] = proc
+
+            # Regex to strip ANSI escape codes
+            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+            in_output_block = False
+            for line in proc.stdout:
+                stripped = line.rstrip("\n")
+                # Remove ANSI color codes
+                stripped = ansi_escape.sub('', stripped)
+
+                # Parse output file markers
+                if stripped == "=== OUTPUT_FILES ===":
+                    in_output_block = True
+                    continue
+                elif stripped == "=== END_OUTPUT_FILES ===":
+                    in_output_block = False
+                    continue
+                elif in_output_block:
+                    if stripped.startswith("JSON:"):
+                        json_file = stripped[5:]
+                    elif stripped.startswith("MAESTERHTML:"):
+                        maester_html_file = stripped[12:]
+                    elif stripped.startswith("MAESTERJSON:"):
+                        maester_json_file = stripped[12:]
+                    elif stripped.startswith("MAESTERMD:"):
+                        maester_md_file = stripped[10:]
+                    continue
+
+                if stripped:
+                    yield sse(stripped)
+
+            proc.wait()
+
+            if proc.returncode != 0:
+                yield sse(f"[!] Assessment exited with code {proc.returncode}", event="m365_error")
+                return
+
+            # Check if we got a JSON file
+            if not json_file:
+                # Look for most recent JSON in client folder
+                import glob
+                json_files = glob.glob(os.path.join(client_folder, "m365assessment_*.json"))
+                if json_files:
+                    json_file = os.path.basename(max(json_files, key=os.path.getctime))
+                    json_file = f"{client}/{json_file}"
+
+            if not json_file or not os.path.exists(os.path.join(BASE_DIR, json_file)):
+                yield sse("[!] No assessment data file found.", event="m365_error")
+                return
+
+            # Load the assessment data
+            yield sse("Parsing assessment data...", event="status")
+            with open(os.path.join(BASE_DIR, json_file), "r") as f:
+                assessment_data = json.load(f)
+
+            # Load Maester markdown report if available
+            maester_md_content = None
+            if maester_md_file and os.path.exists(os.path.join(BASE_DIR, maester_md_file)):
+                try:
+                    with open(os.path.join(BASE_DIR, maester_md_file), "r") as f:
+                        maester_md_content = f.read()
+                    yield sse("Loaded Maester security report for analysis...", event="status")
+                except Exception as e:
+                    yield sse(f"[!] Could not read Maester report: {e}", event="status")
+
+            # Generate AI analysis
+            yield sse("Generating M365 analysis report...", event="status")
+
+            prompt = _m365assessment_prompt(assessment_data, maester_md_content)
+            report_text = ""
+
+            try:
+                for chunk in ollama.generate(model="qwen2.5:14b",
+                                             prompt=prompt,
+                                             stream=True):
+                    tok = chunk.get("response", "")
+                    if tok:
+                        report_text += tok
+                        yield sse(tok, event="report_chunk")
+            except Exception as exc:
+                yield sse(f"Ollama error: {exc}", event="m365_error")
+                yield sse("Ensure ollama is running and 'qwen2.5:14b' model is available.", event="m365_error")
+                return
+
+            # Save the markdown report
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+            md_file = f"m365assessment_report_{timestamp}.md"
+            md_path = os.path.join(client_folder, md_file)
+            with open(md_path, "w") as f:
+                f.write(report_text)
+
+            # Notify browser of files
+            files_data = {
+                "json": json_file,
+                "md": f"{client}/{md_file}",
+            }
+            if maester_html_file:
+                files_data["maesterHtml"] = maester_html_file
+            if maester_json_file:
+                files_data["maesterJson"] = maester_json_file
+
+            yield sse(json.dumps(files_data), event="files")
+            yield sse("M365 Assessment complete.", event="done")
+
+        except Exception as exc:
+            yield sse(f"[!] Error: {exc}", event="m365_error")
+        finally:
+            # Clean up process tracking
+            if session_id and session_id in _active_processes:
+                del _active_processes[session_id]
+            if proc and proc.poll() is None:
+                proc.kill()
+
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    return Response(stream_with_context(generate()),
+                    mimetype="text/event-stream", headers=headers)
+
+
+def _m365assessment_prompt(data: dict, maester_md_content: str = None) -> str:
+    """Build the LLM prompt for M365 Assessment analysis."""
+    metadata = data.get("metadata", {})
+    licensing = data.get("licensing", {})
+    security_score = data.get("securityScore", {})
+    identity = data.get("identity", {})
+    intune = data.get("intune", {})
+    sharepoint = data.get("sharepoint", {})
+    teams = data.get("teams", {})
+    applications = data.get("applications", {})
+    governance = data.get("governance", {})
+    maester = data.get("maester", {})
+
+    # Build license summary
+    skus = licensing.get("subscribedSkus", [])
+    license_summary = ""
+    if skus:
+        license_summary = "\n".join([
+            f"- {s.get('skuPartNumber', 'Unknown')}: {s.get('consumedUnits', 0)} / {s.get('prepaidUnits', 0)} assigned"
+            for s in skus[:15]
+        ])
+
+    # Build CA policy summary
+    ca_policies = identity.get("conditionalAccess", [])
+    enabled_policies = [p for p in ca_policies if p.get("state") == "enabled"]
+    ca_summary = f"Total: {len(ca_policies)}, Enabled: {len(enabled_policies)}"
+
+    # Build admin roles summary
+    admin_roles = governance.get("adminRoles", [])
+    roles_summary = "\n".join([
+        f"- {r.get('roleName', 'Unknown')}: {r.get('memberCount', 0)} members"
+        for r in sorted(admin_roles, key=lambda x: -x.get('memberCount', 0))[:10]
+    ])
+
+    # Build Maester summary
+    maester_summary = ""
+    maester_findings = ""
+    if maester.get("summary") and not maester.get("summary", {}).get("error"):
+        m = maester.get("summary", {})
+        maester_summary = f"""
+### Maester Security Test Results
+- **Passed**: {m.get('passed', 0)}
+- **Failed**: {m.get('failed', 0)}
+- **Skipped**: {m.get('skipped', 0)}
+- **Pass Rate**: {m.get('passRate', 0)}%
+"""
+        # Add failed test details
+        failed_tests = maester.get("testResults", [])
+        if failed_tests:
+            maester_findings = "\n### Failed Security Tests\n"
+            for test in failed_tests[:20]:
+                name = test.get("name", "Unknown")
+                block = test.get("block", "")
+                maester_findings += f"- **{name}**"
+                if block:
+                    maester_findings += f" ({block})"
+                maester_findings += "\n"
+
+    # Build recommendations summary
+    recommendations = security_score.get("recommendations", [])
+    rec_summary = ""
+    if recommendations:
+        rec_summary = "\n### Top Security Score Recommendations\n"
+        for r in recommendations[:10]:
+            title = r.get("title", "Unknown")
+            max_score = r.get("maxScore", 0)
+            rec_summary += f"- **{title}** (+{max_score} points)\n"
+
+    # Data gaps note
+    data_gaps = metadata.get("dataGaps", [])
+    gaps_note = ""
+    if data_gaps:
+        gaps_note = f"\n**Note:** Some data was not available: {', '.join(data_gaps)}\n"
+
+    # Build Intune summary
+    intune_devices = intune.get("managedDevices", {})
+    intune_summary = ""
+    if intune_devices.get("total", 0) > 0:
+        intune_summary = f"""
+- Managed Devices: {intune_devices.get('total', 0)}
+- Compliant: {intune_devices.get('compliant', 0)} ({intune_devices.get('complianceRate', 0)}%)
+- Non-Compliant: {intune_devices.get('nonCompliant', 0)}
+- Compliance Policies: {len(intune.get('compliancePolicies', []))}
+- Configuration Profiles: {len(intune.get('configurationProfiles', []))}
+- App Protection Policies: {len(intune.get('appProtectionPolicies', []))}
+"""
+
+    # SharePoint storage
+    sp_storage_gb = round(sharepoint.get("storageUsed", 0) / (1024**3), 2) if sharepoint.get("storageUsed") else 0
+
+    return f"""You are a Microsoft 365 security consultant performing a comprehensive tenant assessment for an MSP client.
+
+Analyse the following M365 tenant data and provide a structured assessment report.
+
+## Tenant Information
+- Client: {metadata.get('clientName', 'Unknown')}
+- Tenant: {metadata.get('tenantName', 'Unknown')}
+- Primary Domain: {metadata.get('primaryDomain', 'Unknown')}
+- Tenant Created: {metadata.get('createdDateTime', 'Unknown')}
+- Assessment Date: {metadata.get('assessmentDate', 'Unknown')}
+{gaps_note}
+
+## User Summary
+- Total Users: {licensing.get('totalUsers', 0)}
+- Licensed Users: {licensing.get('licensedUsers', 0)}
+- Guest Users: {licensing.get('guestUsers', 0)}
+
+## License Inventory
+{license_summary}
+
+## Microsoft Secure Score
+- Current Score: {security_score.get('currentScore', 0)} / {security_score.get('maxScore', 0)}
+- Percentage: {security_score.get('percentage', 0)}%
+- Identity Score: {security_score.get('identityScore', {}).get('percentage', 'N/A')}%
+{rec_summary}
+
+## Identity & Access
+- Conditional Access Policies: {ca_summary}
+- MFA Registration: {identity.get('mfaStatus', {}).get('registered', 'N/A')} / {identity.get('mfaStatus', {}).get('total', 'N/A')} ({identity.get('mfaStatus', {}).get('percentage', 'N/A')}%)
+- Global Administrators: {identity.get('privilegedAccess', {}).get('globalAdminCount', 'N/A')}
+- Active Directory Roles: {identity.get('privilegedAccess', {}).get('directoryRolesActive', 'N/A')}
+- Named Locations: {len(governance.get('namedLocations', []))}
+- Risky Users: {identity.get('riskyUsers', {}).get('atRisk', 0)}
+
+### Admin Role Breakdown
+{roles_summary}
+
+## Device Management (Intune)
+{intune_summary if intune_summary else "Intune data not available (license may be required)"}
+
+## SharePoint & Teams
+- SharePoint Sites: {sharepoint.get('siteCount', 0)}
+- SharePoint Storage Used: {sp_storage_gb} GB
+- Teams: {teams.get('teamsCount', 0)}
+
+## Applications
+- Enterprise Applications: {applications.get('enterpriseApps', 0)}
+- App Registrations: {applications.get('appRegistrations', 0)}
+{maester_summary}
+{maester_findings}
+{f'''
+## Maester Security Report (Full Details)
+The following is the complete Maester security test report. Use this to identify themes and patterns - DO NOT list every individual test result.
+
+{maester_md_content[:15000] if maester_md_content and len(maester_md_content) > 15000 else maester_md_content if maester_md_content else "Maester report not available."}
+''' if maester_md_content else ''}
+
+---
+
+You are an MSP (Managed Service Provider) consultant writing a report for a prospective or existing client. Your goal is to:
+1. Identify security gaps and risks that justify ongoing managed services
+2. Highlight project opportunities (remediation work the MSP can sell)
+3. Find upsell opportunities (license upgrades, additional services)
+4. Build trust by demonstrating expertise and thorough analysis
+
+CRITICAL FORMATTING RULES:
+1. Use proper Markdown with # for main heading, ## for sections, ### for subsections
+2. Add a BLANK LINE before and after every heading and bullet list
+3. Do NOT repeat sections - each section should appear ONCE only
+4. Reference SPECIFIC data points from the assessment above
+5. Use severity keywords that will be colour-coded: **Critical**, **High**, **Medium**, **Low**
+6. DO NOT list every Maester test pass/fail - instead identify THEMES and PATTERNS
+
+Generate the report in this EXACT structure:
+
+# Microsoft 365 Assessment Report
+
+## Executive Summary
+
+Write 2-3 paragraphs summarising:
+- Overall security posture and Secure Score ({security_score.get('percentage', 0)}%)
+- Key risk areas requiring immediate attention
+- The value an MSP can provide in managing this environment
+
+## Tenant Overview
+
+Brief summary of the environment:
+- {licensing.get('totalUsers', 0)} users, license mix, tenant maturity
+- Key workloads in use (Teams, SharePoint, Intune adoption)
+
+## Security Assessment
+
+### Current Security Posture
+
+Analyse the Secure Score and Maester test results together. Identify 3-5 KEY THEMES from the security gaps - do not list individual tests. Examples: "Identity security gaps", "Lack of device compliance", "Missing data protection controls".
+
+- **Overall Risk Level**: Critical/High/Medium/Low
+
+### Identity & Access Management
+
+Analyse:
+- MFA adoption ({identity.get('mfaStatus', {}).get('percentage', 'N/A')}% registered)
+- Conditional Access policies ({len(enabled_policies)} enabled)
+- Privileged access ({identity.get('privilegedAccess', {}).get('globalAdminCount', 0)} Global Admins)
+- **Risk Level**: Critical/High/Medium/Low
+
+### Device Management
+
+Analyse Intune deployment and compliance status.
+- **Risk Level**: Critical/High/Medium/Low
+
+### Data & Application Security
+
+Review app registrations, enterprise apps, and data protection.
+- **Risk Level**: Critical/High/Medium/Low
+
+## Project Opportunities
+
+Identify specific remediation projects the MSP can propose. For each:
+- Brief description of the gap
+- Recommended solution
+- Business impact if not addressed
+
+Examples: "Conditional Access Implementation", "MFA Rollout", "Intune Enrollment", "Security Baseline Deployment"
+
+## License Optimisation
+
+Analyse current licenses and recommend:
+- Upgrades that unlock security features (e.g., E3 to E5, adding P2)
+- Potential cost savings from unused licenses
+- Features being paid for but not utilised
+
+## Managed Services Value
+
+Explain how ongoing MSP management would benefit this client:
+- Continuous security monitoring
+- Regular security reviews and Secure Score improvement
+- Incident response readiness
+- Compliance maintenance
+
+## Recommendations Roadmap
+
+### Quick Wins (0-30 days)
+
+5-7 items that can be implemented quickly with high impact.
+
+### Short-term Projects (1-3 months)
+
+3-5 projects requiring more planning or change management.
+
+### Strategic Initiatives (3-12 months)
+
+2-3 larger initiatives for security maturity.
+
+## Conclusion
+
+Summarise the engagement opportunity and recommended next steps. End with a clear call to action for the MSP relationship.
+
+---
+
+Be specific - reference actual data points. Focus on business value and actionable recommendations. Use blank lines for readability."""
+
+
 def _zerotrust_prompt(data: dict, zt_data: dict = None) -> str:
     """Build the LLM prompt for Zero Trust analysis."""
     # Extract basic metrics from our custom collection
