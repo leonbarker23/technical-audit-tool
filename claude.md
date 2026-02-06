@@ -28,13 +28,16 @@ A comprehensive assessment suite for MSP technical consultants performing IT aud
 
 ## Architecture
 
+Both Mac and Windows versions share identical functionality. The table below shows the Mac paths; Windows equivalents are in `Windows/`.
+
 | File | Role |
 |------|------|
-| `Mac/scan.py` | Network scanning engine — nmap wrapper, XML parser, LLM prompts |
-| `Mac/app.py` | Flask web server — SSE streaming, routes for all assessments |
-| `Mac/templates/index.html` | Single-page UI with tabbed interface |
-| `Mac/zerotrust.ps1` | PowerShell script for Zero Trust data collection via Microsoft Graph |
-| `Mac/azureinventory.ps1` | PowerShell script for Azure Resource Inventory via ARI module |
+| `scan.py` | Network scanning engine — nmap wrapper, XML parser, LLM prompts |
+| `app.py` | Flask web server — SSE streaming, routes for all assessments |
+| `templates/index.html` | Single-page UI with tabbed interface |
+| `zerotrust.ps1` | PowerShell script for Zero Trust data collection via Microsoft Graph |
+| `azureinventory.ps1` | PowerShell script for Azure Resource Inventory via ARI module |
+| `requirements.txt` | Python dependencies (`flask`, `ollama`) |
 
 ---
 
@@ -189,16 +192,52 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
 ## Dependencies
 
 ### macOS
-- **nmap** — System-wide, run as root
-- **PowerShell 7** — `brew install powershell`
-- **Ollama** — Running locally with `qwen2.5:14b`
-- **Python packages** — `flask`, `ollama`
+
+#### System Dependencies (via Homebrew)
+```bash
+brew install nmap
+brew install powershell
+brew install mono-libgdiplus
+```
+
+| Package | Purpose |
+|---------|---------|
+| `nmap` | Network scanning for Network Discovery tab |
+| `powershell` | PowerShell 7 for Azure Inventory and Zero Trust scripts |
+| `mono-libgdiplus` | GDI+ library for Excel column auto-sizing in ImportExcel module |
+
+#### Ollama (AI)
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull the model
+ollama pull qwen2.5:14b
+```
+
+#### Python Dependencies
+```bash
+cd Mac
+python3 -m venv venv
+venv/bin/pip install -r requirements.txt
+```
+
+See `Mac/requirements.txt` for Python packages (`flask`, `ollama`).
 
 ### Windows
-- **Python** — Auto-installed via `run.bat`
-- **nmap** — Auto-installed via winget
-- **Ollama** — Auto-installed with `qwen2.5:7b`
-- **Python packages** — Auto-installed by `run.bat`
+
+**Zero friction setup** — just run `run.bat` as Administrator. All dependencies are auto-installed:
+
+| Dependency | Installation Method |
+|------------|---------------------|
+| Python 3 | winget or direct download from python.org |
+| pip packages | `pip install flask ollama` |
+| nmap | winget (`Insecure.Nmap`) |
+| Ollama | Direct download of OllamaSetup.exe |
+| qwen2.5:7b model | `ollama pull qwen2.5:7b` |
+| PowerShell 7 | winget (`Microsoft.PowerShell`) |
+
+See `Windows/requirements.txt` for Python packages.
 
 ---
 

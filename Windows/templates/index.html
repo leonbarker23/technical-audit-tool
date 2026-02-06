@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Discovery Tool</title>
+<title>AAG Technical Audit Tool</title>
 <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
 <style>
 /* ── reset & base ─────────────────────────────────── */
@@ -19,15 +19,102 @@ body {
 }
 
 /* ── header ───────────────────────────────────────── */
-.header { text-align:center; padding:36px 20px 8px; }
+.header { text-align:center; padding:24px 20px 8px; }
+.header .logo { margin-bottom:12px; }
+.header .logo svg { height:40px; width:auto; }
 .header h1 {
-    font-size: 1.8rem;
+    font-size: 1.4rem;
     font-weight: 700;
     color: #fff;
-    letter-spacing: 5px;
+    letter-spacing: 3px;
     text-transform: uppercase;
+    background: linear-gradient(90deg, #e81f63, #7b1fa2, #039be5);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
-.header p { color:#484f58; margin-top:6px; font-size:0.875rem; }
+.header p { color:#7d8590; margin-top:6px; font-size:0.825rem; }
+
+/* ── tab navigation ───────────────────────────────── */
+.tab-nav {
+    display: flex;
+    justify-content: center;
+    gap: 4px;
+    padding: 16px 20px 0;
+    max-width: 1400px;
+    margin: 0 auto;
+    flex-wrap: wrap;
+}
+.tab-btn {
+    padding: 12px 24px;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    color: #7d8590;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+    top: 1px;
+}
+.tab-btn:hover {
+    background: #1c2128;
+    color: #c9d1d9;
+}
+.tab-btn.active {
+    background: #0d1117;
+    color: #039be5;
+    border-color: #7b1fa2;
+    border-bottom: 1px solid #0d1117;
+}
+.tab-btn .tab-icon {
+    font-size: 1rem;
+    opacity: 0.8;
+}
+.tab-btn.active .tab-icon {
+    opacity: 1;
+}
+
+/* tab content area */
+.tab-content {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+}
+.tab-content.active {
+    display: flex;
+}
+.tab-placeholder {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #484f58;
+    padding: 40px;
+}
+.tab-placeholder .placeholder-icon {
+    font-size: 4rem;
+    margin-bottom: 20px;
+    opacity: 0.5;
+}
+.tab-placeholder h2 {
+    color: #7d8590;
+    font-size: 1.3rem;
+    margin-bottom: 10px;
+}
+.tab-placeholder p {
+    font-size: 0.9rem;
+    max-width: 500px;
+    text-align: center;
+    line-height: 1.6;
+}
 
 /* ── input area ───────────────────────────────────── */
 .input-wrap { max-width:900px; margin:20px auto 0; padding:0 20px; }
@@ -42,7 +129,7 @@ body {
     font-size:0.95rem;
     transition:border-color .2s;
 }
-.input-row input:focus       { outline:none; border-color:#58a6ff; }
+.input-row input:focus       { outline:none; border-color:#039be5; }
 .input-row input::placeholder { color:#484f58; }
 .input-row select {
     padding:14px 12px;
@@ -60,11 +147,11 @@ body {
     padding-right:32px;
     transition:border-color .2s;
 }
-.input-row select:focus   { outline:none; border-color:#58a6ff; }
+.input-row select:focus   { outline:none; border-color:#039be5; }
 .input-row select option  { background:#161b22; color:#fff; }
 .input-row button {
     padding:14px 30px;
-    background:#238636;
+    background: linear-gradient(135deg, #7b1fa2, #039be5);
     color:#fff;
     border:none;
     border-radius:8px;
@@ -72,10 +159,18 @@ body {
     font-weight:600;
     letter-spacing:1px;
     cursor:pointer;
-    transition:background .2s;
+    transition:opacity .2s;
 }
-.input-row button:hover    { background:#2ea043; }
+.input-row button:hover    { opacity:0.85; }
 .input-row button:disabled { background:#21262d; color:#484f58; cursor:not-allowed; }
+
+/* stop button */
+.input-row button.stop-btn {
+    background:#da3633;
+    display:none;
+}
+.input-row button.stop-btn:hover { background:#f85149; }
+.input-row button.stop-btn.show  { display:inline-block; }
 
 /* interface chips */
 .interfaces { margin-top:12px; display:flex; flex-wrap:wrap; gap:6px; justify-content:center; }
@@ -91,7 +186,7 @@ body {
     transition:border-color .2s;
     user-select:none;
 }
-.iface-chip:hover { border-color:#58a6ff; }
+.iface-chip:hover { border-color:#039be5; }
 
 /* ── status bar ───────────────────────────────────── */
 .status {
@@ -108,13 +203,13 @@ body {
 .status .spinner {
     width:15px; height:15px;
     border:2px solid #30363d;
-    border-top-color:#58a6ff;
+    border-top-color:#039be5;
     border-radius:50%;
     animation:spin .7s linear infinite;
     display:none;
 }
 @keyframes spin { to { transform:rotate(360deg); } }
-.status.scanning  { color:#58a6ff; }
+.status.scanning  { color:#039be5; }
 .status.scanning .spinner  { display:inline-block; }
 .status.analyzing { color:#bc8cff; }
 .status.analyzing .spinner { border-top-color:#bc8cff; display:inline-block; }
@@ -159,7 +254,7 @@ body {
     background:#30363d;
     transition:background .3s;
 }
-.panel-head .dot.active { background:#58a6ff; }
+.panel-head .dot.active { background:#039be5; }
 .panel-head .dot.done   { background:#7ee787; }
 .panel-head span {
     font-size:0.78rem;
@@ -170,7 +265,7 @@ body {
 }
 
 /* ── left panel – live log ────────────────────────── */
-#logPanel {
+#logPanel, #ztLogPanel, .log-panel {
     flex:1;
     min-height:0;
     overflow-y:auto;
@@ -179,15 +274,15 @@ body {
     font-size:0.78rem;
     line-height:1.75;
 }
-#logPanel .line           { white-space:pre-wrap; word-break:break-all; }
-#logPanel .dim            { color:#484f58; }
-#logPanel .info           { color:#7ee787; }
-#logPanel .highlight      { color:#58a6ff; }
-#logPanel .warn           { color:#d29922; }
-#logPanel .err            { color:#f85149; }
+#logPanel .line, #ztLogPanel .line, .log-panel .line { white-space:pre-wrap; word-break:break-all; }
+.line.dim            { color:#484f58; }
+.line.info           { color:#7ee787; }
+.line.highlight      { color:#039be5; }
+.line.warn           { color:#d29922; }
+.line.err            { color:#f85149; }
 
 /* ── right panel – vulnerability report ───────────── */
-#reportPanel {
+#reportPanel, #ztReportPanel, .report-panel {
     flex:1;
     min-height:0;
     overflow-y:auto;
@@ -201,16 +296,16 @@ body {
     font-size:0.9rem;
 }
 
-/* rendered markdown styles */
-#reportPanel h1 { color:#fff; font-size:1.4rem; margin:0 0 14px; }
-#reportPanel h2 { color:#fff; font-size:1.15rem; margin:22px 0 10px; padding-bottom:6px; border-bottom:1px solid #30363d; }
-#reportPanel h3 { color:#bc8cff; font-size:1rem; margin:16px 0 8px; }
-#reportPanel p  { color:#c9d1d9; line-height:1.75; margin-bottom:10px; }
-#reportPanel ul,
-#reportPanel ol { margin:6px 0 12px 22px; }
-#reportPanel li { color:#c9d1d9; line-height:1.75; margin-bottom:4px; }
-#reportPanel hr { border:none; border-top:1px solid #30363d; margin:18px 0; }
-#reportPanel code {
+/* rendered markdown styles - apply to both report panels */
+#reportPanel h1, #ztReportPanel h1 { color:#fff; font-size:1.4rem; margin:0 0 14px; }
+#reportPanel h2, #ztReportPanel h2 { color:#fff; font-size:1.15rem; margin:22px 0 10px; padding-bottom:6px; border-bottom:1px solid #30363d; }
+#reportPanel h3, #ztReportPanel h3 { color:#bc8cff; font-size:1rem; margin:16px 0 8px; }
+#reportPanel p, #ztReportPanel p  { color:#c9d1d9; line-height:1.75; margin-bottom:10px; }
+#reportPanel ul, #ztReportPanel ul,
+#reportPanel ol, #ztReportPanel ol { margin:6px 0 12px 22px; }
+#reportPanel li, #ztReportPanel li { color:#c9d1d9; line-height:1.75; margin-bottom:4px; }
+#reportPanel hr, #ztReportPanel hr { border:none; border-top:1px solid #30363d; margin:18px 0; }
+#reportPanel code, #ztReportPanel code {
     background:#1c2128;
     border:1px solid #30363d;
     padding:1px 6px;
@@ -219,19 +314,19 @@ body {
     color:#f0883e;
 }
 /* tables from marked */
-#reportPanel table           { width:100%; border-collapse:collapse; margin:12px 0; font-size:0.82rem; }
-#reportPanel th              { background:#0d1117; color:#7d8590; text-align:left; padding:7px 10px; border-bottom:2px solid #30363d; font-weight:600; }
-#reportPanel td              { padding:6px 10px; border-bottom:1px solid #30363d; color:#c9d1d9; }
-#reportPanel tr:hover td     { background:rgba(88,166,255,0.06); }
-#reportPanel pre             { background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:12px 14px; overflow-x:auto; margin:10px 0; }
-#reportPanel pre code        { background:none; border:none; padding:0; color:#c9d1d9; font-size:0.78rem; }
-#reportPanel blockquote      { border-left:3px solid #58a6ff; padding:4px 12px; background:rgba(88,166,255,0.06); border-radius:0 6px 6px 0; margin:8px 0; color:#c9d1d9; }
+#reportPanel table, #ztReportPanel table { width:100%; border-collapse:collapse; margin:12px 0; font-size:0.82rem; }
+#reportPanel th, #ztReportPanel th { background:#0d1117; color:#7d8590; text-align:left; padding:7px 10px; border-bottom:2px solid #30363d; font-weight:600; }
+#reportPanel td, #ztReportPanel td { padding:6px 10px; border-bottom:1px solid #30363d; color:#c9d1d9; }
+#reportPanel tr:hover td, #ztReportPanel tr:hover td { background:rgba(88,166,255,0.06); }
+#reportPanel pre, #ztReportPanel pre { background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:12px 14px; overflow-x:auto; margin:10px 0; }
+#reportPanel pre code, #ztReportPanel pre code { background:none; border:none; padding:0; color:#c9d1d9; font-size:0.78rem; }
+#reportPanel blockquote, #ztReportPanel blockquote { border-left:3px solid #039be5; padding:4px 12px; background:rgba(88,166,255,0.06); border-radius:0 6px 6px 0; margin:8px 0; color:#c9d1d9; }
 
 /* severity colours */
 .sev-critical { color:#f85149 !important; font-weight:700; }
 .sev-high     { color:#f85149 !important; font-weight:600; }
 .sev-medium   { color:#d29922 !important; font-weight:600; }
-.sev-low      { color:#58a6ff !important; font-weight:600; }
+.sev-low      { color:#039be5 !important; font-weight:600; }
 /* [!] flag badge */
 .flag {
     display:inline-block;
@@ -258,7 +353,7 @@ body {
 .dl-btn {
     padding:6px 14px;
     background:#21262d;
-    color:#58a6ff;
+    color:#039be5;
     border:1px solid #30363d;
     border-radius:6px;
     font-size:0.78rem;
@@ -267,6 +362,34 @@ body {
     transition:background .15s;
 }
 .dl-btn:hover { background:#30363d; }
+.dl-btn.zt-html { background: linear-gradient(135deg, #7b1fa2, #039be5); color:#fff; border-color:#7b1fa2; }
+.dl-btn.zt-html:hover { opacity:0.85; }
+
+/* ── checkboxes ──────────────────────────────────── */
+.checkbox-row {
+    display: flex;
+    gap: 24px;
+    margin-top: 12px;
+    justify-content: center;
+}
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #7d8590;
+    font-size: 0.85rem;
+    cursor: pointer;
+    user-select: none;
+}
+.checkbox-label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: #039be5;
+    cursor: pointer;
+}
+.checkbox-label:hover {
+    color: #c9d1d9;
+}
 
 /* ── scrollbar ────────────────────────────────────── */
 ::-webkit-scrollbar            { width:6px; }
@@ -285,9 +408,37 @@ body {
 
 <!-- header -->
 <div class="header">
-    <h1>Discovery Tool</h1>
-    <p>Network vulnerability scanning &amp; analysis</p>
+    <div class="logo">
+        <svg height="48" viewBox="0 0 143 48" width="143" xmlns="http://www.w3.org/2000/svg"><linearGradient id="aag-grad" x1="0%" x2="100%" y1="44.382076%" y2="55.617924%"><stop offset=".00087412587" stop-color="#e81f63"/><stop offset=".515532289" stop-color="#7b1fa2"/><stop offset="1" stop-color="#039be5"/></linearGradient><path d="m79.4150863 3.76749091c-1.1548883-2.30909091-3.5132995-3.76727273-6.0909289-3.76727273-2.5790813 0-4.9367665 1.45818182-6.0916549 3.76727273l-17.1026548 34.18545459c-1.6869645 3.370909-.3266497 7.4727272 3.0378427 9.1621818 3.3652182 1.6901818 7.4585025.3265454 9.1447411-3.0436364l11.0117259-22.0094545 11.0102741 22.0087272c1.1948122 2.3898182 3.5996802 3.7701819 6.096736 3.7701819 1.0264061 0 2.0680559-.2334546 3.0480051-.7258182 3.3644924-1.6894546 4.7248071-5.7912728 3.0385685-9.1621818zm-49.4054112 0c-1.1556142-2.30909091-3.5132995-3.76727273-6.0916548-3.76727273s-4.9360406 1.45818182-6.0916548 3.76727273l-17.10192895 34.18545459c-1.68696447 3.370909-.32664975 7.4727272 3.03784264 9.1621818 3.36449238 1.6901818 7.45777661.3265454 9.14474111-3.0436364l11.011-22.0094545 11.011 22.0087272c1.1948122 2.3898182 3.5996802 3.7701819 6.096736 3.7701819 1.0264061 0 2.0680559-.2334546 3.0480051-.7258182 3.3644924-1.6894546 4.7248071-5.7912728 3.0378427-9.1621818zm112.7137619 15.07636359v4.6538182c0 12.8363637-10.464407 24.0858182-23.273432 24.3381818-13.85503.2727273-25.1099289-11.4087272-24.1684517-25.4261818.844934-12.57672725 11.6599437-22.15636361 24.2410407-22.15636361h4.922249c1.069959 0 2.097091.42618182 2.854193 1.184l9.911279 9.92581821c.12703.1272727.03702.3454545-.143.3454545h-17.787894c-6.893035 0-12.44971 5.7287273-12.186213 12.6938182.240269 6.336 5.508767 11.5585455 11.834157 11.7367273 4.603584.1301818 8.652589-2.2974546 10.835336-5.968h-18.747518c-.180021 0-.270031-.2174546-.143726-.3447273l10.694513-10.7978182c.758553-.7658182 1.79004-1.1963636 2.866533-1.1963636h17.281223c.557482 0 1.009711.4530909 1.009711 1.0116363z" fill="url(#aag-grad)" fill-rule="evenodd"/></svg>
+    </div>
+    <h1>Technical Audit Tool</h1>
+    <p>Comprehensive assessment suite for IT audits &amp; reviews</p>
 </div>
+
+<!-- tab navigation -->
+<nav class="tab-nav">
+    <button class="tab-btn active" data-tab="network">
+        <span class="tab-icon">&#x1F50D;</span>
+        Network Discovery
+    </button>
+    <button class="tab-btn" data-tab="m365">
+        <span class="tab-icon">&#x2601;</span>
+        M365 Assessment
+    </button>
+    <button class="tab-btn" data-tab="azure">
+        <span class="tab-icon">&#x2601;</span>
+        Azure Inventory (ARI)
+    </button>
+    <button class="tab-btn" data-tab="zerotrust">
+        <span class="tab-icon">&#x1F512;</span>
+        Zero Trust Assessment
+    </button>
+</nav>
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!-- TAB: Network Discovery -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div class="tab-content active" id="tab-network">
 
 <!-- input -->
 <div class="input-wrap">
@@ -304,6 +455,7 @@ body {
             <option value="fast">Fast Scan</option>
         </select>
         <button id="scanBtn">SCAN</button>
+        <button id="stopScanBtn" class="stop-btn">STOP</button>
     </div>
     {% if interfaces %}
     <div class="interfaces">
@@ -348,12 +500,158 @@ body {
     </div>
 </div>
 
+</div><!-- end tab-network -->
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!-- TAB: M365 Assessment -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div class="tab-content" id="tab-m365">
+    <div class="tab-placeholder">
+        <div class="placeholder-icon">&#x2601;</div>
+        <h2>Microsoft 365 Assessment</h2>
+        <p>Analyse M365 tenant configuration, security settings, license utilisation, and compliance policies. Includes Exchange Online, SharePoint, Teams, and Entra ID configuration review.</p>
+    </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!-- TAB: Azure Inventory (ARI) -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div class="tab-content" id="tab-azure">
+
+<!-- input -->
+<div class="input-wrap">
+    <div class="input-row">
+        <input type="text" id="ariClientInput"
+               placeholder="Client name"
+               autocomplete="off" style="flex:0 0 200px;" />
+        <button id="ariAssessBtn">RUN INVENTORY</button>
+        <button id="ariStopBtn" class="stop-btn">STOP</button>
+    </div>
+    <div class="checkbox-row">
+        <label class="checkbox-label">
+            <input type="checkbox" id="ariSecurityCenter" />
+            Include Security Center recommendations
+        </label>
+        <label class="checkbox-label">
+            <input type="checkbox" id="ariSkipDiagram" />
+            Skip network diagram generation
+        </label>
+    </div>
+    <p style="color:#7d8590; font-size:0.8rem; margin-top:10px; text-align:center;">
+        Requires PowerShell 7 and will prompt for Azure authentication (Reader access to subscriptions)
+    </p>
+</div>
+
+<!-- status -->
+<div class="status" id="ariStatusBar">
+    <div class="spinner"></div>
+    <span id="ariStatusText"></span>
+</div>
+
+<!-- panels -->
+<div class="panels">
+    <!-- left: live log -->
+    <div class="panel">
+        <div class="panel-head">
+            <div class="dot" id="ariLogDot"></div>
+            <span>Inventory Progress</span>
+        </div>
+        <div id="ariLogPanel" class="log-panel">
+            <div class="line dim">Waiting for inventory...</div>
+        </div>
+    </div>
+
+    <!-- right: AI report -->
+    <div class="panel">
+        <div class="panel-head">
+            <div class="dot" id="ariReportDot"></div>
+            <span>Infrastructure Analysis</span>
+        </div>
+        <div id="ariReportPanel" class="report-panel">
+            <p class="placeholder">The infrastructure analysis will appear here once the inventory is complete.</p>
+        </div>
+        <div class="dl-bar" id="ariDlBar"></div>
+    </div>
+</div>
+
+</div><!-- end tab-azure -->
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!-- TAB: Zero Trust Assessment -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div class="tab-content" id="tab-zerotrust">
+
+<!-- input -->
+<div class="input-wrap">
+    <div class="input-row">
+        <input type="text" id="ztClientInput"
+               placeholder="Client name"
+               autocomplete="off" style="flex:0 0 200px;" />
+        <button id="ztAssessBtn">RUN ASSESSMENT</button>
+        <button id="ztStopBtn" class="stop-btn">STOP</button>
+    </div>
+    <p style="color:#7d8590; font-size:0.8rem; margin-top:10px; text-align:center;">
+        Requires PowerShell 7 and will prompt for Microsoft 365 authentication (Global Reader or Admin)
+    </p>
+</div>
+
+<!-- status -->
+<div class="status" id="ztStatusBar">
+    <div class="spinner"></div>
+    <span id="ztStatusText"></span>
+</div>
+
+<!-- panels -->
+<div class="panels">
+    <!-- left: live log -->
+    <div class="panel">
+        <div class="panel-head">
+            <div class="dot" id="ztLogDot"></div>
+            <span>Assessment Progress</span>
+        </div>
+        <div id="ztLogPanel" class="log-panel">
+            <div class="line dim">Waiting for assessment…</div>
+        </div>
+    </div>
+
+    <!-- right: AI report -->
+    <div class="panel">
+        <div class="panel-head">
+            <div class="dot" id="ztReportDot"></div>
+            <span>Zero Trust Analysis</span>
+        </div>
+        <div id="ztReportPanel" class="report-panel">
+            <p class="placeholder">The Zero Trust analysis will appear here once the assessment is complete.</p>
+        </div>
+        <div class="dl-bar" id="ztDlBar"></div>
+    </div>
+</div>
+
+</div><!-- end tab-zerotrust -->
+
 <script>
+/* ── tab navigation ───────────────────────────────── */
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        // update button states
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        // update content visibility
+        const tabId = btn.dataset.tab;
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.remove('active');
+        });
+        document.getElementById('tab-' + tabId).classList.add('active');
+    });
+});
+
 /* ── wiring ───────────────────────────────────────── */
 let es          = null;
 let reportAccum = '';                          // streamed report buffer
 
 document.getElementById('scanBtn').addEventListener('click', startScan);
+document.getElementById('stopScanBtn').addEventListener('click', stopScan);
 document.getElementById('targetInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') startScan();
 });
@@ -367,6 +665,8 @@ document.querySelectorAll('.iface-chip').forEach(chip => {
 });
 
 /* ── scan ─────────────────────────────────────────── */
+let scanSessionId = null;
+
 function startScan() {
     const target = document.getElementById('targetInput').value.trim();
     const client = document.getElementById('clientInput').value.trim();
@@ -374,9 +674,13 @@ function startScan() {
     if (!client) { setStatus('Enter a client name first.', 'err'); return; }
     if (es) { es.close(); es = null; }
 
+    // Generate session ID for this scan
+    scanSessionId = Date.now().toString();
+
     // reset UI
     reportAccum = '';
-    document.getElementById('scanBtn').disabled     = true;
+    document.getElementById('scanBtn').disabled = true;
+    document.getElementById('stopScanBtn').classList.add('show');
     document.getElementById('logPanel').innerHTML   = '';
     document.getElementById('reportPanel').innerHTML = '<p class="placeholder">Waiting for analysis…</p>';
     document.getElementById('dlBar').classList.remove('show');
@@ -388,7 +692,8 @@ function startScan() {
     const depth = document.getElementById('depthSelect').value;
     es = new EventSource('/scan?target=' + encodeURIComponent(target) +
                          '&client=' + encodeURIComponent(client) +
-                         '&depth='  + encodeURIComponent(depth));
+                         '&depth='  + encodeURIComponent(depth) +
+                         '&session=' + encodeURIComponent(scanSessionId));
 
     // default event → log line
     es.onmessage = e => appendLog(e.data);
@@ -432,7 +737,9 @@ function startScan() {
         dot('logDot',    'done');
         dot('reportDot', 'done');
         document.getElementById('scanBtn').disabled = false;
+        document.getElementById('stopScanBtn').classList.remove('show');
         es.close(); es = null;
+        scanSessionId = null;
     });
 
     es.addEventListener('scan_error', e => {
@@ -440,16 +747,36 @@ function startScan() {
         appendLog('[!] ' + e.data, 'err');
         dot('logDot', '');
         document.getElementById('scanBtn').disabled = false;
+        document.getElementById('stopScanBtn').classList.remove('show');
         es.close(); es = null;
+        scanSessionId = null;
     });
 
     es.onerror = () => {
         if (es) {
             setStatus('Connection lost', 'err');
             document.getElementById('scanBtn').disabled = false;
+            document.getElementById('stopScanBtn').classList.remove('show');
             es.close(); es = null;
+            scanSessionId = null;
         }
     };
+}
+
+function stopScan() {
+    if (scanSessionId) {
+        fetch('/stop?session=' + encodeURIComponent(scanSessionId), { method: 'POST' });
+    }
+    if (es) {
+        es.close();
+        es = null;
+    }
+    setStatus('Scan stopped by user.', 'err');
+    appendLog('[!] Scan stopped by user.', 'err');
+    dot('logDot', '');
+    document.getElementById('scanBtn').disabled = false;
+    document.getElementById('stopScanBtn').classList.remove('show');
+    scanSessionId = null;
 }
 
 /* ── UI helpers ───────────────────────────────────── */
@@ -476,6 +803,295 @@ function classForLine(t) {
     if (/\[\+\]|open/i.test(t))             return 'highlight';
     if (/\[\*\]|filtered|warning/i.test(t)) return 'warn';
     return 'info';
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   ZERO TRUST ASSESSMENT
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+let ztEs = null;
+let ztReportAccum = '';
+let ztSessionId = null;
+
+document.getElementById('ztAssessBtn').addEventListener('click', startZtAssessment);
+document.getElementById('ztStopBtn').addEventListener('click', stopZtAssessment);
+document.getElementById('ztClientInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') startZtAssessment();
+});
+
+function startZtAssessment() {
+    const client = document.getElementById('ztClientInput').value.trim();
+    if (!client) { ztSetStatus('Enter a client name first.', 'err'); return; }
+    if (ztEs) { ztEs.close(); ztEs = null; }
+
+    // Generate session ID for this assessment
+    ztSessionId = Date.now().toString();
+
+    // reset UI
+    ztReportAccum = '';
+    document.getElementById('ztAssessBtn').disabled = true;
+    document.getElementById('ztStopBtn').classList.add('show');
+    document.getElementById('ztLogPanel').innerHTML = '';
+    document.getElementById('ztReportPanel').innerHTML = '<p class="placeholder">Waiting for analysis…</p>';
+    document.getElementById('ztDlBar').classList.remove('show');
+    document.getElementById('ztDlBar').innerHTML = '';
+    ztDot('ztLogDot', 'active');
+    ztDot('ztReportDot', '');
+    ztSetStatus('Starting Zero Trust Assessment…', 'scanning');
+
+    ztEs = new EventSource('/zerotrust?client=' + encodeURIComponent(client) +
+                           '&session=' + encodeURIComponent(ztSessionId));
+
+    // default event → log line
+    ztEs.onmessage = e => ztAppendLog(e.data);
+
+    ztEs.addEventListener('status', e => {
+        ztSetStatus(e.data, 'analyzing');
+        ztAppendLog('[*] ' + e.data, 'warn');
+    });
+
+    // streamed LLM report
+    ztEs.addEventListener('report_chunk', e => {
+        ztReportAccum += e.data;
+        ztDot('ztReportDot', 'active');
+
+        let html = marked.parse(ztReportAccum);
+        html = html.replace(/\[!\]/g, '<span class="flag">[!]</span>');
+        html = html.replace(/<strong>(Critical[^<]*)<\/strong>/gi, '<span class="sev-critical">$1</span>');
+        html = html.replace(/<strong>(High[^<]*)<\/strong>/gi, '<span class="sev-high">$1</span>');
+        html = html.replace(/<strong>(Medium[^<]*)<\/strong>/gi, '<span class="sev-medium">$1</span>');
+        html = html.replace(/<strong>(Low[^<]*)<\/strong>/gi, '<span class="sev-low">$1</span>');
+
+        const rp = document.getElementById('ztReportPanel');
+        rp.innerHTML = html;
+        rp.scrollTop = rp.scrollHeight;
+    });
+
+    // generated-file download links
+    ztEs.addEventListener('files', e => {
+        const f = JSON.parse(e.data);
+        const bar = document.getElementById('ztDlBar');
+        bar.innerHTML =
+            `<a href="/download/${f.json}" class="dl-btn" download>JSON</a>` +
+            `<a href="/download/${f.md}" class="dl-btn" download>Markdown</a>` +
+            (f.html ? `<a href="/download/${f.html}" class="dl-btn zt-html" target="_blank">View HTML Report</a>` : '');
+        bar.classList.add('show');
+    });
+
+    ztEs.addEventListener('done', e => {
+        ztSetStatus(e.data, 'done');
+        ztDot('ztLogDot', 'done');
+        ztDot('ztReportDot', 'done');
+        document.getElementById('ztAssessBtn').disabled = false;
+        document.getElementById('ztStopBtn').classList.remove('show');
+        ztEs.close(); ztEs = null;
+        ztSessionId = null;
+    });
+
+    ztEs.addEventListener('zt_error', e => {
+        ztSetStatus(e.data, 'err');
+        ztAppendLog('[!] ' + e.data, 'err');
+        ztDot('ztLogDot', '');
+        document.getElementById('ztAssessBtn').disabled = false;
+        document.getElementById('ztStopBtn').classList.remove('show');
+        ztEs.close(); ztEs = null;
+        ztSessionId = null;
+    });
+
+    ztEs.onerror = () => {
+        if (ztEs) {
+            ztSetStatus('Connection lost', 'err');
+            document.getElementById('ztAssessBtn').disabled = false;
+            document.getElementById('ztStopBtn').classList.remove('show');
+            ztEs.close(); ztEs = null;
+            ztSessionId = null;
+        }
+    };
+}
+
+function stopZtAssessment() {
+    if (ztSessionId) {
+        fetch('/stop?session=' + encodeURIComponent(ztSessionId), { method: 'POST' });
+    }
+    if (ztEs) {
+        ztEs.close();
+        ztEs = null;
+    }
+    ztSetStatus('Assessment stopped by user.', 'err');
+    ztAppendLog('[!] Assessment stopped by user.', 'err');
+    ztDot('ztLogDot', '');
+    document.getElementById('ztAssessBtn').disabled = false;
+    document.getElementById('ztStopBtn').classList.remove('show');
+    ztSessionId = null;
+}
+
+function ztSetStatus(msg, cls) {
+    document.getElementById('ztStatusBar').className = 'status ' + cls;
+    document.getElementById('ztStatusText').textContent = msg;
+}
+
+function ztDot(id, state) {
+    document.getElementById(id).className = 'dot' + (state ? ' ' + state : '');
+}
+
+function ztAppendLog(text, forceClass) {
+    const panel = document.getElementById('ztLogPanel');
+    const div = document.createElement('div');
+    div.className = 'line ' + (forceClass || classForLine(text));
+    div.textContent = text;
+    panel.appendChild(div);
+    panel.scrollTop = panel.scrollHeight;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   AZURE RESOURCE INVENTORY
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+let ariEs = null;
+let ariReportAccum = '';
+let ariSessionId = null;
+
+document.getElementById('ariAssessBtn').addEventListener('click', startAriAssessment);
+document.getElementById('ariStopBtn').addEventListener('click', stopAriAssessment);
+document.getElementById('ariClientInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') startAriAssessment();
+});
+
+function startAriAssessment() {
+    const client = document.getElementById('ariClientInput').value.trim();
+    if (!client) { ariSetStatus('Enter a client name first.', 'err'); return; }
+    if (ariEs) { ariEs.close(); ariEs = null; }
+
+    // Generate session ID for this assessment
+    ariSessionId = Date.now().toString();
+
+    // Get options
+    const includeSecurityCenter = document.getElementById('ariSecurityCenter').checked;
+    const skipDiagram = document.getElementById('ariSkipDiagram').checked;
+
+    // reset UI
+    ariReportAccum = '';
+    document.getElementById('ariAssessBtn').disabled = true;
+    document.getElementById('ariStopBtn').classList.add('show');
+    document.getElementById('ariLogPanel').innerHTML = '';
+    document.getElementById('ariReportPanel').innerHTML = '<p class="placeholder">Waiting for analysis...</p>';
+    document.getElementById('ariDlBar').classList.remove('show');
+    document.getElementById('ariDlBar').innerHTML = '';
+    ariDot('ariLogDot', 'active');
+    ariDot('ariReportDot', '');
+    ariSetStatus('Starting Azure Resource Inventory...', 'scanning');
+
+    const url = '/azureinventory?client=' + encodeURIComponent(client) +
+                '&session=' + encodeURIComponent(ariSessionId) +
+                '&securityCenter=' + includeSecurityCenter +
+                '&skipDiagram=' + skipDiagram;
+
+    ariEs = new EventSource(url);
+
+    // default event → log line
+    ariEs.onmessage = e => ariAppendLog(e.data);
+
+    ariEs.addEventListener('status', e => {
+        ariSetStatus(e.data, 'analyzing');
+        ariAppendLog('[*] ' + e.data, 'warn');
+    });
+
+    // streamed LLM report
+    ariEs.addEventListener('report_chunk', e => {
+        ariReportAccum += e.data;
+        ariDot('ariReportDot', 'active');
+
+        let html = marked.parse(ariReportAccum);
+        html = html.replace(/\[!\]/g, '<span class="flag">[!]</span>');
+        html = html.replace(/<strong>(Critical[^<]*)<\/strong>/gi, '<span class="sev-critical">$1</span>');
+        html = html.replace(/<strong>(High[^<]*)<\/strong>/gi, '<span class="sev-high">$1</span>');
+        html = html.replace(/<strong>(Medium[^<]*)<\/strong>/gi, '<span class="sev-medium">$1</span>');
+        html = html.replace(/<strong>(Low[^<]*)<\/strong>/gi, '<span class="sev-low">$1</span>');
+
+        const rp = document.getElementById('ariReportPanel');
+        rp.innerHTML = html;
+        rp.scrollTop = rp.scrollHeight;
+    });
+
+    // generated-file download links
+    ariEs.addEventListener('files', e => {
+        const f = JSON.parse(e.data);
+        const bar = document.getElementById('ariDlBar');
+        let btns = `<a href="/download/${f.json}" class="dl-btn" download>JSON</a>`;
+        btns += `<a href="/download/${f.md}" class="dl-btn" download>Markdown</a>`;
+        if (f.excel) {
+            btns += `<a href="/download/${f.excel}" class="dl-btn zt-html" download>Excel Report</a>`;
+        }
+        if (f.diagram) {
+            btns += `<a href="/download/${f.diagram}" class="dl-btn" download>Network Diagram</a>`;
+        }
+        bar.innerHTML = btns;
+        bar.classList.add('show');
+    });
+
+    ariEs.addEventListener('done', e => {
+        ariSetStatus(e.data, 'done');
+        ariDot('ariLogDot', 'done');
+        ariDot('ariReportDot', 'done');
+        document.getElementById('ariAssessBtn').disabled = false;
+        document.getElementById('ariStopBtn').classList.remove('show');
+        ariEs.close(); ariEs = null;
+        ariSessionId = null;
+    });
+
+    ariEs.addEventListener('ari_error', e => {
+        ariSetStatus(e.data, 'err');
+        ariAppendLog('[!] ' + e.data, 'err');
+        ariDot('ariLogDot', '');
+        document.getElementById('ariAssessBtn').disabled = false;
+        document.getElementById('ariStopBtn').classList.remove('show');
+        ariEs.close(); ariEs = null;
+        ariSessionId = null;
+    });
+
+    ariEs.onerror = () => {
+        if (ariEs) {
+            ariSetStatus('Connection lost', 'err');
+            document.getElementById('ariAssessBtn').disabled = false;
+            document.getElementById('ariStopBtn').classList.remove('show');
+            ariEs.close(); ariEs = null;
+            ariSessionId = null;
+        }
+    };
+}
+
+function stopAriAssessment() {
+    if (ariSessionId) {
+        fetch('/stop?session=' + encodeURIComponent(ariSessionId), { method: 'POST' });
+    }
+    if (ariEs) {
+        ariEs.close();
+        ariEs = null;
+    }
+    ariSetStatus('Inventory stopped by user.', 'err');
+    ariAppendLog('[!] Inventory stopped by user.', 'err');
+    ariDot('ariLogDot', '');
+    document.getElementById('ariAssessBtn').disabled = false;
+    document.getElementById('ariStopBtn').classList.remove('show');
+    ariSessionId = null;
+}
+
+function ariSetStatus(msg, cls) {
+    document.getElementById('ariStatusBar').className = 'status ' + cls;
+    document.getElementById('ariStatusText').textContent = msg;
+}
+
+function ariDot(id, state) {
+    document.getElementById(id).className = 'dot' + (state ? ' ' + state : '');
+}
+
+function ariAppendLog(text, forceClass) {
+    const panel = document.getElementById('ariLogPanel');
+    const div = document.createElement('div');
+    div.className = 'line ' + (forceClass || classForLine(text));
+    div.textContent = text;
+    panel.appendChild(div);
+    panel.scrollTop = panel.scrollHeight;
 }
 </script>
 </body>
