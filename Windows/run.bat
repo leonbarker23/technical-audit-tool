@@ -244,6 +244,10 @@ echo ============================================
 echo   All dependencies ready - Starting app...
 echo ============================================
 echo.
+
+:: Open browser after a short delay (backup in case Python fails to open it)
+start "" cmd /c "timeout /t 3 /nobreak >nul && start http://127.0.0.1:5000"
+
 %PYTHON% "%~dp0app.py"
 
 pause

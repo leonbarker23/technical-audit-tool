@@ -962,8 +962,11 @@ Be specific - reference the actual test failures. Use blank lines for readabilit
 
 def _open_browser():
     import time
-    time.sleep(1)
-    webbrowser.open("http://127.0.0.1:5000")
+    time.sleep(1.5)
+    try:
+        webbrowser.open("http://127.0.0.1:5000")
+    except Exception:
+        pass  # Ignore browser open errors
 
 
 if __name__ == "__main__":
@@ -980,5 +983,8 @@ if __name__ == "__main__":
     print()
 
     print("[*] Technical Audit Analysis → http://127.0.0.1:5000")
+    print("[*] Opening browser...")
     threading.Thread(target=_open_browser, daemon=True).start()
+    print("[*] Server starting... (press Ctrl+C to stop)")
+    print()
     app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
