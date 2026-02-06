@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Discovery Tool</title>
+<script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+<style>
+/* ── reset & base ─────────────────────────────────── */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0a0b0e;
+    color: #c9d1d9;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* ── header ───────────────────────────────────────── */
+.header { text-align:center; padding:36px 20px 8px; }
+.header h1 {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 5px;
+    text-transform: uppercase;
+}
+.header p { color:#484f58; margin-top:6px; font-size:0.875rem; }
+
+/* ── input area ───────────────────────────────────── */
+.input-wrap { max-width:900px; margin:20px auto 0; padding:0 20px; }
+.input-row  { display:flex; gap:10px; }
+.input-row input {
+    flex:1;
+    padding:14px 18px;
+    background:#161b22;
+    border:1px solid #30363d;
+    border-radius:8px;
+    color:#fff;
+    font-size:0.95rem;
+    transition:border-color .2s;
+}
+.input-row input:focus       { outline:none; border-color:#58a6ff; }
+.input-row input::placeholder { color:#484f58; }
+.input-row select {
+    padding:14px 12px;
+    background:#161b22;
+    border:1px solid #30363d;
+    border-radius:8px;
+    color:#fff;
+    font-size:0.9rem;
+    cursor:pointer;
+    appearance:none;
+    -webkit-appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23484f58'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;
+    background-position:right 12px center;
+    padding-right:32px;
+    transition:border-color .2s;
+}
+.input-row select:focus   { outline:none; border-color:#58a6ff; }
+.input-row select option  { background:#161b22; color:#fff; }
+.input-row button {
+    padding:14px 30px;
+    background:#238636;
+    color:#fff;
+    border:none;
+    border-radius:8px;
+    font-size:0.9rem;
+    font-weight:600;
+    letter-spacing:1px;
+    cursor:pointer;
+    transition:background .2s;
+}
+.input-row button:hover    { background:#2ea043; }
+.input-row button:disabled { background:#21262d; color:#484f58; cursor:not-allowed; }
+
+/* interface chips */
+.interfaces { margin-top:12px; display:flex; flex-wrap:wrap; gap:6px; justify-content:center; }
+.iface-chip {
+    font-family:'SF Mono',Consolas,monospace;
+    font-size:0.78rem;
+    background:#161b22;
+    border:1px solid #30363d;
+    border-radius:20px;
+    padding:4px 14px;
+    color:#7ee787;
+    cursor:pointer;
+    transition:border-color .2s;
+    user-select:none;
+}
+.iface-chip:hover { border-color:#58a6ff; }
+
+/* ── status bar ───────────────────────────────────── */
+.status {
+    text-align:center;
+    padding:14px 20px;
+    font-size:0.82rem;
+    color:#484f58;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    min-height:40px;
+}
+.status .spinner {
+    width:15px; height:15px;
+    border:2px solid #30363d;
+    border-top-color:#58a6ff;
+    border-radius:50%;
+    animation:spin .7s linear infinite;
+    display:none;
+}
+@keyframes spin { to { transform:rotate(360deg); } }
+.status.scanning  { color:#58a6ff; }
+.status.scanning .spinner  { display:inline-block; }
+.status.analyzing { color:#bc8cff; }
+.status.analyzing .spinner { border-top-color:#bc8cff; display:inline-block; }
+.status.done      { color:#7ee787; }
+.status.err       { color:#f85149; }
+
+/* ── two-panel layout ─────────────────────────────── */
+.panels {
+    flex:1;
+    min-height:0;
+    display:flex;
+    gap:16px;
+    padding:0 20px 20px;
+    max-width:1400px;
+    width:100%;
+    margin:0 auto;
+    box-sizing:border-box;
+}
+.panel {
+    flex:1;
+    min-width:0;
+    min-height:0;
+    background:#161b22;
+    border:1px solid #30363d;
+    border-radius:10px;
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+}
+.panel-head {
+    display:flex;
+    align-items:center;
+    gap:9px;
+    padding:13px 18px;
+    background:#0d1117;
+    border-bottom:1px solid #30363d;
+    flex-shrink:0;
+}
+.panel-head .dot {
+    width:11px; height:11px;
+    border-radius:50%;
+    background:#30363d;
+    transition:background .3s;
+}
+.panel-head .dot.active { background:#58a6ff; }
+.panel-head .dot.done   { background:#7ee787; }
+.panel-head span {
+    font-size:0.78rem;
+    font-weight:600;
+    color:#7d8590;
+    text-transform:uppercase;
+    letter-spacing:1.2px;
+}
+
+/* ── left panel – live log ────────────────────────── */
+#logPanel {
+    flex:1;
+    min-height:0;
+    overflow-y:auto;
+    padding:14px 18px;
+    font-family:'SF Mono',Consolas,monospace;
+    font-size:0.78rem;
+    line-height:1.75;
+}
+#logPanel .line           { white-space:pre-wrap; word-break:break-all; }
+#logPanel .dim            { color:#484f58; }
+#logPanel .info           { color:#7ee787; }
+#logPanel .highlight      { color:#58a6ff; }
+#logPanel .warn           { color:#d29922; }
+#logPanel .err            { color:#f85149; }
+
+/* ── right panel – vulnerability report ───────────── */
+#reportPanel {
+    flex:1;
+    min-height:0;
+    overflow-y:auto;
+    padding:24px 28px;
+}
+.placeholder {
+    color:#484f58;
+    font-style:italic;
+    text-align:center;
+    margin-top:60px;
+    font-size:0.9rem;
+}
+
+/* rendered markdown styles */
+#reportPanel h1 { color:#fff; font-size:1.4rem; margin:0 0 14px; }
+#reportPanel h2 { color:#fff; font-size:1.15rem; margin:22px 0 10px; padding-bottom:6px; border-bottom:1px solid #30363d; }
+#reportPanel h3 { color:#bc8cff; font-size:1rem; margin:16px 0 8px; }
+#reportPanel p  { color:#c9d1d9; line-height:1.75; margin-bottom:10px; }
+#reportPanel ul,
+#reportPanel ol { margin:6px 0 12px 22px; }
+#reportPanel li { color:#c9d1d9; line-height:1.75; margin-bottom:4px; }
+#reportPanel hr { border:none; border-top:1px solid #30363d; margin:18px 0; }
+#reportPanel code {
+    background:#1c2128;
+    border:1px solid #30363d;
+    padding:1px 6px;
+    border-radius:4px;
+    font-size:0.85em;
+    color:#f0883e;
+}
+/* tables from marked */
+#reportPanel table           { width:100%; border-collapse:collapse; margin:12px 0; font-size:0.82rem; }
+#reportPanel th              { background:#0d1117; color:#7d8590; text-align:left; padding:7px 10px; border-bottom:2px solid #30363d; font-weight:600; }
+#reportPanel td              { padding:6px 10px; border-bottom:1px solid #30363d; color:#c9d1d9; }
+#reportPanel tr:hover td     { background:rgba(88,166,255,0.06); }
+#reportPanel pre             { background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:12px 14px; overflow-x:auto; margin:10px 0; }
+#reportPanel pre code        { background:none; border:none; padding:0; color:#c9d1d9; font-size:0.78rem; }
+#reportPanel blockquote      { border-left:3px solid #58a6ff; padding:4px 12px; background:rgba(88,166,255,0.06); border-radius:0 6px 6px 0; margin:8px 0; color:#c9d1d9; }
+
+/* severity colours */
+.sev-critical { color:#f85149 !important; font-weight:700; }
+.sev-high     { color:#f85149 !important; font-weight:600; }
+.sev-medium   { color:#d29922 !important; font-weight:600; }
+.sev-low      { color:#58a6ff !important; font-weight:600; }
+/* [!] flag badge */
+.flag {
+    display:inline-block;
+    background:#3d1f1f;
+    color:#f85149;
+    font-size:0.72rem;
+    font-weight:700;
+    padding:1px 7px;
+    border-radius:4px;
+    margin-right:3px;
+    vertical-align:middle;
+}
+
+/* ── download bar (bottom of right panel) ─────────── */
+.dl-bar {
+    display:none;
+    gap:8px;
+    padding:10px 18px;
+    border-top:1px solid #30363d;
+    background:#0d1117;
+    flex-shrink:0;
+}
+.dl-bar.show  { display:flex; }
+.dl-btn {
+    padding:6px 14px;
+    background:#21262d;
+    color:#58a6ff;
+    border:1px solid #30363d;
+    border-radius:6px;
+    font-size:0.78rem;
+    cursor:pointer;
+    text-decoration:none;
+    transition:background .15s;
+}
+.dl-btn:hover { background:#30363d; }
+
+/* ── scrollbar ────────────────────────────────────── */
+::-webkit-scrollbar            { width:6px; }
+::-webkit-scrollbar-track      { background:transparent; }
+::-webkit-scrollbar-thumb      { background:#30363d; border-radius:3px; }
+::-webkit-scrollbar-thumb:hover{ background:#484f58; }
+
+/* ── responsive ───────────────────────────────────── */
+@media (max-width:768px) {
+    .panels { flex-direction:column; }
+    .panel  { min-height:300px; }
+}
+</style>
+</head>
+<body>
+
+<!-- header -->
+<div class="header">
+    <h1>Discovery Tool</h1>
+    <p>Network vulnerability scanning &amp; analysis</p>
+</div>
+
+<!-- input -->
+<div class="input-wrap">
+    <div class="input-row">
+        <input type="text" id="clientInput"
+               placeholder="Client name"
+               autocomplete="off" style="flex:0 0 200px;" />
+        <input type="text" id="targetInput"
+               placeholder="Enter hostname, subnet or IP address to scan…"
+               autocomplete="off" />
+        <select id="depthSelect">
+            <option value="deep">Deep Scan</option>
+            <option value="medium" selected>Medium Scan</option>
+            <option value="fast">Fast Scan</option>
+        </select>
+        <button id="scanBtn">SCAN</button>
+    </div>
+    {% if interfaces %}
+    <div class="interfaces">
+        {% for name, ip, network in interfaces %}
+        <div class="iface-chip" data-value="{{ network }}">
+            {{ name }}&nbsp;&nbsp;{{ ip }}&nbsp;&nbsp;{{ network }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+<!-- status -->
+<div class="status" id="statusBar">
+    <div class="spinner"></div>
+    <span id="statusText"></span>
+</div>
+
+<!-- panels -->
+<div class="panels">
+    <!-- left: live log -->
+    <div class="panel">
+        <div class="panel-head">
+            <div class="dot" id="logDot"></div>
+            <span>Live Scan Output</span>
+        </div>
+        <div id="logPanel">
+            <div class="line dim">Waiting for scan…</div>
+        </div>
+    </div>
+
+    <!-- right: vuln report -->
+    <div class="panel">
+        <div class="panel-head">
+            <div class="dot" id="reportDot"></div>
+            <span>Vulnerability Report</span>
+        </div>
+        <div id="reportPanel">
+            <p class="placeholder">The vulnerability report will appear here once scanning and analysis are complete.</p>
+        </div>
+        <div class="dl-bar" id="dlBar"></div>
+    </div>
+</div>
+
+<script>
+/* ── wiring ───────────────────────────────────────── */
+let es          = null;
+let reportAccum = '';                          // streamed report buffer
+
+document.getElementById('scanBtn').addEventListener('click', startScan);
+document.getElementById('targetInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') startScan();
+});
+
+// interface chips → fill input
+document.querySelectorAll('.iface-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+        document.getElementById('targetInput').value = chip.dataset.value;
+        document.getElementById('targetInput').focus();
+    });
+});
+
+/* ── scan ─────────────────────────────────────────── */
+function startScan() {
+    const target = document.getElementById('targetInput').value.trim();
+    const client = document.getElementById('clientInput').value.trim();
+    if (!target) return;
+    if (!client) { setStatus('Enter a client name first.', 'err'); return; }
+    if (es) { es.close(); es = null; }
+
+    // reset UI
+    reportAccum = '';
+    document.getElementById('scanBtn').disabled     = true;
+    document.getElementById('logPanel').innerHTML   = '';
+    document.getElementById('reportPanel').innerHTML = '<p class="placeholder">Waiting for analysis…</p>';
+    document.getElementById('dlBar').classList.remove('show');
+    document.getElementById('dlBar').innerHTML      = '';
+    dot('logDot',    'active');
+    dot('reportDot', '');
+    setStatus('Connecting…', 'scanning');
+
+    const depth = document.getElementById('depthSelect').value;
+    es = new EventSource('/scan?target=' + encodeURIComponent(target) +
+                         '&client=' + encodeURIComponent(client) +
+                         '&depth='  + encodeURIComponent(depth));
+
+    // default event → log line
+    es.onmessage = e => appendLog(e.data);
+
+    es.addEventListener('status', e => {
+        setStatus(e.data, 'analyzing');
+        appendLog('[*] ' + e.data, 'warn');
+    });
+
+    // ── streamed LLM report ──────────────────────────
+    es.addEventListener('report_chunk', e => {
+        reportAccum += e.data;
+        dot('reportDot', 'active');
+
+        // render full accumulated markdown, then highlight [!] flags
+        let html = marked.parse(reportAccum);
+        html = html.replace(/\[!\]/g, '<span class="flag">[!]</span>');
+        // severity colour wrappers inside rendered <strong>
+        html = html.replace(/<strong>(Critical[^<]*)<\/strong>/gi, '<span class="sev-critical">$1</span>');
+        html = html.replace(/<strong>(High[^<]*)<\/strong>/gi,     '<span class="sev-high">$1</span>');
+        html = html.replace(/<strong>(Medium[^<]*)<\/strong>/gi,   '<span class="sev-medium">$1</span>');
+        html = html.replace(/<strong>(Low[^<]*)<\/strong>/gi,      '<span class="sev-low">$1</span>');
+
+        const rp = document.getElementById('reportPanel');
+        rp.innerHTML = html;
+        rp.scrollTop = rp.scrollHeight;
+    });
+
+    // ── generated-file download links ────────────────
+    es.addEventListener('files', e => {
+        const f   = JSON.parse(e.data);
+        const bar = document.getElementById('dlBar');
+        bar.innerHTML =
+            `<a href="/download/${f.json}" class="dl-btn" download="${f.json}">Download JSON</a>` +
+            `<a href="/download/${f.md}"  class="dl-btn" download="${f.md}">Download Report</a>`;
+        bar.classList.add('show');
+    });
+
+    es.addEventListener('done', e => {
+        setStatus(e.data, 'done');
+        dot('logDot',    'done');
+        dot('reportDot', 'done');
+        document.getElementById('scanBtn').disabled = false;
+        es.close(); es = null;
+    });
+
+    es.addEventListener('scan_error', e => {
+        setStatus(e.data, 'err');
+        appendLog('[!] ' + e.data, 'err');
+        dot('logDot', '');
+        document.getElementById('scanBtn').disabled = false;
+        es.close(); es = null;
+    });
+
+    es.onerror = () => {
+        if (es) {
+            setStatus('Connection lost', 'err');
+            document.getElementById('scanBtn').disabled = false;
+            es.close(); es = null;
+        }
+    };
+}
+
+/* ── UI helpers ───────────────────────────────────── */
+function setStatus(msg, cls) {
+    document.getElementById('statusBar').className   = 'status ' + cls;
+    document.getElementById('statusText').textContent = msg;
+}
+
+function dot(id, state) {
+    document.getElementById(id).className = 'dot' + (state ? ' ' + state : '');
+}
+
+function appendLog(text, forceClass) {
+    const panel = document.getElementById('logPanel');
+    const div   = document.createElement('div');
+    div.className   = 'line ' + (forceClass || classForLine(text));
+    div.textContent = text;
+    panel.appendChild(div);
+    panel.scrollTop = panel.scrollHeight;
+}
+
+function classForLine(t) {
+    if (/\[!\]|error/i.test(t))             return 'err';
+    if (/\[\+\]|open/i.test(t))             return 'highlight';
+    if (/\[\*\]|filtered|warning/i.test(t)) return 'warn';
+    return 'info';
+}
+</script>
+</body>
+</html>

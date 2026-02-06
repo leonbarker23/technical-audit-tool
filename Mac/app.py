@@ -1,0 +1,956 @@
+import os
+import sys
+import json
+import re
+import subprocess
+import tempfile
+import webbrowser
+import threading
+import ipaddress
+import socket
+
+import ollama
+from flask import Flask, Response, request, stream_with_context, render_template, send_from_directory
+from scan import MSPConsultantTool, classify_target, _get_local_interfaces
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__)) or os.getcwd()
+
+app = Flask(__name__)
+
+# Only allow characters that are valid in an IP, CIDR, or hostname.
+# Rejects anything that could be interpreted as nmap flags or shell metacharacters.
+_TARGET_RE = re.compile(r'^[A-Za-z0-9.\-/:]+$')
+
+# Client name: letters, digits, spaces, hyphens, underscores.  Becomes a folder name.
+_CLIENT_RE = re.compile(r'^[A-Za-z0-9 _-]+$')
+
+# Track active processes by session ID for stop functionality
+_active_processes = {}
+
+
+def _validate_target(target: str) -> bool:
+    """Return True only if target looks like a plain IP, CIDR, or hostname."""
+    if not _TARGET_RE.match(target):
+        return False
+    # Must resolve to at least one of: bare IP, CIDR network, or resolvable hostname
+    try:
+        ipaddress.ip_address(target)
+        return True
+    except ValueError:
+        pass
+    try:
+        ipaddress.ip_network(target, strict=False)
+        return True
+    except ValueError:
+        pass
+    try:
+        socket.gethostbyname(target)
+        return True
+    except socket.gaierror:
+        return False
+
+
+def sse(data, event=None):
+    """Format a Server-Sent Event."""
+    msg = f"event: {event}\n" if event else ""
+    for line in str(data).split("\n"):
+        msg += f"data: {line}\n"
+    return msg + "\n"
+
+
+# ── routes ──────────────────────────────────────────
+
+@app.route("/")
+def index():
+    interfaces = _get_local_interfaces()
+    return render_template("index.html", interfaces=interfaces)
+
+
+@app.route("/scan")
+def scan():
+    target = request.args.get("target", "").strip()
+    client = request.args.get("client", "").strip()
+    session_id = request.args.get("session", "").strip()
+
+    if not client or not _CLIENT_RE.match(client):
+        return Response(sse("Invalid or missing client name.", event="scan_error"),
+                        mimetype="text/event-stream")
+
+    if not target:
+        return Response(sse("No target provided.", event="scan_error"),
+                        mimetype="text/event-stream")
+
+    if not _validate_target(target):
+        return Response(sse("Invalid target. Enter a valid IP, CIDR, or hostname.", event="scan_error"),
+                        mimetype="text/event-stream")
+
+    scan_depth = request.args.get("depth", "deep").strip().lower()
+    if scan_depth not in ("deep", "medium", "fast"):
+        return Response(sse("Invalid scan depth.", event="scan_error"),
+                        mimetype="text/event-stream")
+
+    scan_type = classify_target(target)          # single | subnet — drives LLM prompt choice
+    if scan_type is None:
+        return Response(sse(f"'{target}' could not be resolved.", event="scan_error"),
+                        mimetype="text/event-stream")
+
+    def generate():
+        tool  = MSPConsultantTool()
+        args  = tool.SCAN_PROFILES[scan_depth]
+        label = scan_depth.capitalize() + " Scan"
+
+        yield sse(f"[*] Target  : {target}")
+        yield sse(f"[*] Scan    : {label}")
+        yield sse(f"[*] Flags   : {args}")
+        yield sse("")
+
+        # ── nmap ─────────────────────────────────────
+        xml_fd, xml_path = tempfile.mkstemp(suffix=".xml", prefix="nmap_")
+        os.close(xml_fd)
+        cmd  = ["nmap"] + args.split() + ["-v", "-oX", xml_path, target]
+        proc = None
+
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True)
+
+            # Register process for stop functionality
+            if session_id:
+                _active_processes[session_id] = proc
+
+            for line in proc.stdout:
+                stripped = line.rstrip("\n")
+                if stripped:
+                    yield sse(stripped)
+            proc.wait()
+
+            if proc.returncode != 0:
+                yield sse(f"[!] nmap exited with code {proc.returncode}", event="scan_error")
+                return
+
+            # ── parse ──────────────────────────────────
+            yield sse("Parsing scan results…", event="status")
+            tech_data = tool._parse_nmap_xml(xml_path)
+            if not tech_data:
+                yield sse("No hosts found in scan results.", event="scan_error")
+                return
+
+            # ── LLM (streamed token-by-token) ────────────
+            yield sse("Generating vulnerability report…", event="status")
+            active_data = {ip: info for ip, info in tech_data.items() if info.get("status") == "up"}
+            summary = tool._build_summary(active_data)
+            prompt  = (tool._prompt_single(summary)
+                       if scan_type == "single"
+                       else tool._prompt_subnet(summary, len(active_data)))
+
+            report_text = ""
+            try:
+                for chunk in ollama.generate(model=tool.model,
+                                             prompt=prompt,
+                                             stream=True):
+                    tok = chunk.get("response", "")
+                    if tok:
+                        report_text += tok
+                        yield sse(tok, event="report_chunk")
+            except Exception as exc:
+                yield sse(f"Ollama error: {exc}\n"
+                          f"Ensure ollama is running and '{tool.model}' is pulled.",
+                          event="scan_error")
+
+            # ── save to disk ─────────────────────────────
+            json_file, md_file = tool.save_outputs(tech_data, report_text or None, scan_type, client, target)
+
+            # ── notify browser of generated files ────────
+            yield sse(json.dumps({
+                "json": f"{client}/{json_file}",
+                "md":   f"{client}/{md_file}",
+            }), event="files")
+            yield sse("Scan and analysis complete.", event="done")
+
+        finally:
+            # Clean up process tracking
+            if session_id and session_id in _active_processes:
+                del _active_processes[session_id]
+            if proc and proc.poll() is None:
+                proc.kill()
+            if os.path.exists(xml_path):
+                os.unlink(xml_path)
+
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    return Response(stream_with_context(generate()),
+                    mimetype="text/event-stream", headers=headers)
+
+
+@app.route("/download/<path:filename>")
+def download(filename):
+    """Serve generated reports.  send_from_directory prevents path-traversal."""
+    return send_from_directory(BASE_DIR, filename)
+
+
+@app.route("/stop", methods=["POST"])
+def stop_process():
+    """Stop a running scan or assessment by session ID."""
+    session_id = request.args.get("session", "").strip()
+    if not session_id:
+        return {"error": "No session ID provided"}, 400
+
+    proc = _active_processes.pop(session_id, None)
+    if proc and proc.poll() is None:
+        try:
+            proc.kill()
+            return {"status": "stopped", "session": session_id}
+        except Exception as e:
+            return {"error": str(e)}, 500
+
+    return {"status": "not_found", "session": session_id}
+
+
+# ── Zero Trust Assessment ────────────────────────────────────────────────────
+
+@app.route("/zerotrust")
+def zerotrust():
+    client = request.args.get("client", "").strip()
+    session_id = request.args.get("session", "").strip()
+
+    if not client or not _CLIENT_RE.match(client):
+        return Response(sse("Invalid or missing client name.", event="zt_error"),
+                        mimetype="text/event-stream")
+
+    def generate():
+        import shutil
+        from datetime import datetime
+
+        # Check for PowerShell
+        pwsh_path = shutil.which("pwsh")
+        if not pwsh_path:
+            yield sse("PowerShell 7 (pwsh) not found.", event="zt_error")
+            yield sse("Install with: brew install powershell", event="zt_error")
+            return
+
+        yield sse("[*] PowerShell 7 found: " + pwsh_path)
+        yield sse("[*] Client: " + client)
+        yield sse("")
+
+        # Create client folder if needed
+        client_folder = os.path.join(BASE_DIR, client)
+        os.makedirs(client_folder, exist_ok=True)
+
+        # Run the Zero Trust assessment PowerShell script
+        script_path = os.path.join(BASE_DIR, "zerotrust.ps1")
+        if not os.path.exists(script_path):
+            yield sse("zerotrust.ps1 script not found.", event="zt_error")
+            return
+
+        yield sse("[*] Running Zero Trust Assessment…")
+        yield sse("[*] A browser window will open for Microsoft authentication")
+        yield sse("")
+
+        cmd = [
+            pwsh_path, "-NoProfile", "-ExecutionPolicy", "Bypass",
+            "-File", script_path,
+            "-OutputPath", BASE_DIR,
+            "-ClientName", client
+        ]
+
+        proc = None
+        json_file = None
+        zt_json_file = None
+        html_file = None
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=BASE_DIR
+            )
+
+            # Register process for stop functionality
+            if session_id:
+                _active_processes[session_id] = proc
+
+            in_output_block = False
+            for line in proc.stdout:
+                stripped = line.rstrip("\n")
+
+                # Parse output file markers
+                if stripped == "=== OUTPUT_FILES ===":
+                    in_output_block = True
+                    continue
+                elif stripped == "=== END_OUTPUT_FILES ===":
+                    in_output_block = False
+                    continue
+                elif in_output_block:
+                    if stripped.startswith("JSON:"):
+                        json_file = stripped[5:]
+                    elif stripped.startswith("ZTJSON:"):
+                        zt_json_file = stripped[7:]
+                    elif stripped.startswith("HTML:"):
+                        html_file = stripped[5:]
+                    continue
+
+                if stripped:
+                    yield sse(stripped)
+
+            proc.wait()
+
+            if proc.returncode != 0:
+                yield sse(f"[!] Assessment exited with code {proc.returncode}", event="zt_error")
+                return
+
+            # Check if we got a JSON file
+            if not json_file:
+                # Look for most recent JSON in client folder
+                import glob
+                json_files = glob.glob(os.path.join(client_folder, "zerotrust_*.json"))
+                if json_files:
+                    json_file = os.path.basename(max(json_files, key=os.path.getctime))
+                    json_file = f"{client}/{json_file}"
+
+            if not json_file or not os.path.exists(os.path.join(BASE_DIR, json_file)):
+                yield sse("[!] No assessment data file found.", event="zt_error")
+                return
+
+            # Load the assessment data
+            yield sse("Parsing assessment data…", event="status")
+            with open(os.path.join(BASE_DIR, json_file), "r") as f:
+                assessment_data = json.load(f)
+
+            # Load detailed ZT assessment data if available (from Microsoft module)
+            zt_assessment_data = None
+            if zt_json_file and os.path.exists(os.path.join(BASE_DIR, zt_json_file)):
+                yield sse("Loading detailed Microsoft assessment data…", event="status")
+                try:
+                    with open(os.path.join(BASE_DIR, zt_json_file), "r", encoding="utf-8-sig") as f:
+                        zt_assessment_data = json.load(f)
+                except Exception as e:
+                    yield sse(f"[!] Could not load detailed data: {e}")
+
+            # Generate AI analysis
+            yield sse("Generating Zero Trust analysis report…", event="status")
+
+            prompt = _zerotrust_prompt(assessment_data, zt_assessment_data)
+            report_text = ""
+
+            try:
+                for chunk in ollama.generate(model="qwen2.5:14b",
+                                             prompt=prompt,
+                                             stream=True):
+                    tok = chunk.get("response", "")
+                    if tok:
+                        report_text += tok
+                        yield sse(tok, event="report_chunk")
+            except Exception as exc:
+                yield sse(f"Ollama error: {exc}", event="zt_error")
+                yield sse("Ensure ollama is running and 'qwen2.5:14b' model is available.", event="zt_error")
+                return
+
+            # Save the markdown report
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+            md_file = f"zerotrust_report_{timestamp}.md"
+            md_path = os.path.join(client_folder, md_file)
+            with open(md_path, "w") as f:
+                f.write(report_text)
+
+            # Notify browser of files
+            files_data = {
+                "json": json_file,
+                "md": f"{client}/{md_file}",
+            }
+            if html_file:
+                files_data["html"] = html_file
+
+            yield sse(json.dumps(files_data), event="files")
+            yield sse("Zero Trust Assessment complete.", event="done")
+
+        except Exception as exc:
+            yield sse(f"[!] Error: {exc}", event="zt_error")
+        finally:
+            # Clean up process tracking
+            if session_id and session_id in _active_processes:
+                del _active_processes[session_id]
+            if proc and proc.poll() is None:
+                proc.kill()
+
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    return Response(stream_with_context(generate()),
+                    mimetype="text/event-stream", headers=headers)
+
+
+# ── Azure Resource Inventory ──────────────────────────────────────────────────
+
+@app.route("/azureinventory")
+def azureinventory():
+    client = request.args.get("client", "").strip()
+    session_id = request.args.get("session", "").strip()
+    include_security = request.args.get("securityCenter", "").lower() == "true"
+    skip_diagram = request.args.get("skipDiagram", "").lower() == "true"
+
+    if not client or not _CLIENT_RE.match(client):
+        return Response(sse("Invalid or missing client name.", event="ari_error"),
+                        mimetype="text/event-stream")
+
+    def generate():
+        import shutil
+        from datetime import datetime
+
+        # Check for PowerShell
+        pwsh_path = shutil.which("pwsh")
+        if not pwsh_path:
+            yield sse("PowerShell 7 (pwsh) not found.", event="ari_error")
+            yield sse("Install with: brew install powershell", event="ari_error")
+            return
+
+        yield sse("[*] PowerShell 7 found: " + pwsh_path)
+        yield sse("[*] Client: " + client)
+        yield sse("")
+
+        # Create client folder if needed
+        client_folder = os.path.join(BASE_DIR, client)
+        os.makedirs(client_folder, exist_ok=True)
+
+        # Run the Azure Resource Inventory PowerShell script
+        script_path = os.path.join(BASE_DIR, "azureinventory.ps1")
+        if not os.path.exists(script_path):
+            yield sse("azureinventory.ps1 script not found.", event="ari_error")
+            return
+
+        yield sse("[*] Running Azure Resource Inventory...")
+        yield sse("[*] A browser window will open for Azure authentication")
+        yield sse("")
+
+        cmd = [
+            pwsh_path, "-NoProfile", "-ExecutionPolicy", "Bypass",
+            "-File", script_path,
+            "-OutputPath", BASE_DIR,
+            "-ClientName", client
+        ]
+
+        if include_security:
+            cmd.append("-IncludeSecurityCenter")
+        if skip_diagram:
+            cmd.append("-SkipDiagram")
+
+        proc = None
+        json_file = None
+        excel_file = None
+        diagram_file = None
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=BASE_DIR
+            )
+
+            # Register process for stop functionality
+            if session_id:
+                _active_processes[session_id] = proc
+
+            # Regex to strip ANSI escape codes
+            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+            in_output_block = False
+            for line in proc.stdout:
+                stripped = line.rstrip("\n")
+                # Remove ANSI color codes
+                stripped = ansi_escape.sub('', stripped)
+
+                # Parse output file markers
+                if stripped == "=== OUTPUT_FILES ===":
+                    in_output_block = True
+                    continue
+                elif stripped == "=== END_OUTPUT_FILES ===":
+                    in_output_block = False
+                    continue
+                elif in_output_block:
+                    if stripped.startswith("JSON:"):
+                        json_file = stripped[5:]
+                    elif stripped.startswith("EXCEL:"):
+                        excel_file = stripped[6:]
+                    elif stripped.startswith("DIAGRAM:"):
+                        diagram_file = stripped[8:]
+                    continue
+
+                if stripped:
+                    yield sse(stripped)
+
+            proc.wait()
+
+            if proc.returncode != 0:
+                yield sse(f"[!] Inventory exited with code {proc.returncode}", event="ari_error")
+                return
+
+            # Check if we got a JSON file
+            if not json_file:
+                # Look for most recent JSON in client folder
+                import glob
+                ari_folder = os.path.join(client_folder, "AzureInventory")
+                json_files = glob.glob(os.path.join(ari_folder, "azureinventory_*.json"))
+                if json_files:
+                    json_file = os.path.basename(max(json_files, key=os.path.getctime))
+                    json_file = f"{client}/AzureInventory/{json_file}"
+
+            if not json_file or not os.path.exists(os.path.join(BASE_DIR, json_file)):
+                yield sse("[!] No inventory data file found.", event="ari_error")
+                return
+
+            # Load the inventory data
+            yield sse("Parsing inventory data...", event="status")
+            with open(os.path.join(BASE_DIR, json_file), "r") as f:
+                inventory_data = json.load(f)
+
+            # Generate AI analysis
+            yield sse("Generating Azure infrastructure analysis report...", event="status")
+
+            prompt = _azureinventory_prompt(inventory_data)
+            report_text = ""
+
+            try:
+                for chunk in ollama.generate(model="qwen2.5:14b",
+                                             prompt=prompt,
+                                             stream=True):
+                    tok = chunk.get("response", "")
+                    if tok:
+                        report_text += tok
+                        yield sse(tok, event="report_chunk")
+            except Exception as exc:
+                yield sse(f"Ollama error: {exc}", event="ari_error")
+                yield sse("Ensure ollama is running and 'qwen2.5:14b' model is available.", event="ari_error")
+                return
+
+            # Save the markdown report
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+            md_file = f"azureinventory_report_{timestamp}.md"
+            ari_folder = os.path.join(client_folder, "AzureInventory")
+            md_path = os.path.join(ari_folder, md_file)
+            with open(md_path, "w") as f:
+                f.write(report_text)
+
+            # Notify browser of files
+            files_data = {
+                "json": json_file,
+                "md": f"{client}/AzureInventory/{md_file}",
+            }
+            if excel_file:
+                files_data["excel"] = excel_file
+            if diagram_file:
+                files_data["diagram"] = diagram_file
+
+            yield sse(json.dumps(files_data), event="files")
+            yield sse("Azure Resource Inventory complete.", event="done")
+
+        except Exception as exc:
+            yield sse(f"[!] Error: {exc}", event="ari_error")
+        finally:
+            # Clean up process tracking
+            if session_id and session_id in _active_processes:
+                del _active_processes[session_id]
+            if proc and proc.poll() is None:
+                proc.kill()
+
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    return Response(stream_with_context(generate()),
+                    mimetype="text/event-stream", headers=headers)
+
+
+def _azureinventory_prompt(data: dict) -> str:
+    """Build the LLM prompt for Azure Resource Inventory analysis."""
+    metadata = data.get("metadata", {})
+    summary = data.get("summary", {})
+    subscriptions = data.get("subscriptions", [])
+    compute = data.get("compute", {})
+    networking = data.get("networking", {})
+    storage = data.get("storage", {})
+    databases = data.get("databases", {})
+    security = data.get("security", {})
+
+    # Build resource type summary
+    resource_types = summary.get("resourcesByType", {})
+    type_summary = "\n".join([f"- {k}: {v}" for k, v in sorted(resource_types.items(), key=lambda x: -x[1]) if v > 0][:15])
+
+    # Build location summary
+    locations = summary.get("resourcesByLocation", {})
+    location_summary = "\n".join([f"- {k}: {v}" for k, v in sorted(locations.items(), key=lambda x: -x[1]) if v > 0])
+
+    # Build subscription summary
+    sub_summary = "\n".join([f"- {s.get('name', 'Unknown')} ({s.get('state', 'Unknown')})" for s in subscriptions[:10]])
+
+    # Build compute summary
+    vms = compute.get("virtualMachines", [])
+    vm_summary = ""
+    if vms:
+        vm_by_size = {}
+        vm_by_state = {"running": 0, "stopped": 0, "other": 0}
+        for vm in vms:
+            size = vm.get("vmSize", "Unknown")
+            vm_by_size[size] = vm_by_size.get(size, 0) + 1
+            state = (vm.get("powerState") or "").lower()
+            if "running" in state:
+                vm_by_state["running"] += 1
+            elif "stopped" in state or "deallocated" in state:
+                vm_by_state["stopped"] += 1
+            else:
+                vm_by_state["other"] += 1
+        vm_summary = f"""
+Virtual Machines: {len(vms)} total
+- Running: {vm_by_state['running']}
+- Stopped/Deallocated: {vm_by_state['stopped']}
+- Top VM sizes: {', '.join([f"{k}({v})" for k, v in sorted(vm_by_size.items(), key=lambda x: -x[1])[:5]])}
+"""
+
+    # Build networking summary
+    vnets = networking.get("virtualNetworks", [])
+    nsgs = networking.get("networkSecurityGroups", [])
+    lbs = networking.get("loadBalancers", [])
+    pips = networking.get("publicIPs", [])
+    net_summary = f"""
+- Virtual Networks: {len(vnets)}
+- Network Security Groups: {len(nsgs)}
+- Load Balancers: {len(lbs)}
+- Public IPs: {len(pips)}
+"""
+
+    # Build storage summary
+    storage_accounts = storage.get("storageAccounts", [])
+    storage_summary = f"- Storage Accounts: {len(storage_accounts)}"
+
+    # Build database summary
+    sql_servers = databases.get("sqlServers", [])
+    sql_dbs = databases.get("sqlDatabases", [])
+    cosmos = databases.get("cosmosDbAccounts", [])
+    db_summary = f"""
+- SQL Servers: {len(sql_servers)}
+- SQL Databases: {len(sql_dbs)}
+- Cosmos DB Accounts: {len(cosmos)}
+"""
+
+    # Build security summary
+    key_vaults = security.get("keyVaults", [])
+    recommendations = security.get("recommendations", [])
+    sec_summary = f"""
+- Key Vaults: {len(key_vaults)}
+- Security Recommendations: {len(recommendations)}
+"""
+
+    # Security recommendations detail
+    sec_recommendations = ""
+    if recommendations:
+        sec_recommendations = "\n### Security Recommendations\n"
+        for rec in recommendations[:20]:
+            severity = rec.get("severity", "Unknown")
+            recommendation = rec.get("recommendation", "Unknown")
+            sec_recommendations += f"- **[{severity}]** {recommendation}\n"
+
+    return f"""You are an Azure infrastructure consultant performing an Azure Resource Inventory analysis for an MSP client.
+
+Analyse the following Azure environment data and provide a structured infrastructure assessment report.
+
+## Tenant Information
+- Client: {metadata.get('clientName', 'Unknown')}
+- Assessment Date: {metadata.get('assessmentDate', 'Unknown')}
+- Tenant ID: {metadata.get('tenantId', 'Unknown')}
+
+## Summary
+- Total Resources: {summary.get('totalResources', 0)}
+- Subscriptions: {summary.get('subscriptionCount', 0)}
+
+## Subscriptions
+{sub_summary}
+
+## Resources by Type (Top 15)
+{type_summary}
+
+## Resources by Location
+{location_summary}
+
+## Compute Resources
+{vm_summary}
+- App Services: {len(compute.get('appServices', []))}
+- Functions: {len(compute.get('functions', []))}
+- AKS Clusters: {len(compute.get('aks', []))}
+- VM Scale Sets: {len(compute.get('vmScaleSets', []))}
+
+## Networking
+{net_summary}
+
+## Storage
+{storage_summary}
+
+## Databases
+{db_summary}
+
+## Security
+{sec_summary}
+{sec_recommendations}
+
+---
+
+CRITICAL FORMATTING RULES:
+1. Use proper Markdown with # for main heading, ## for sections, ### for subsections
+2. Add a BLANK LINE before and after every heading and bullet list
+3. Do NOT repeat sections - each section should appear ONCE only
+4. Reference SPECIFIC resource counts and types from the data above
+
+Generate the report in this EXACT structure:
+
+# Azure Resource Inventory Report
+
+## Executive Summary
+
+Write 2-3 paragraphs summarising the Azure environment, its scale, and key observations. Include total resource count and subscription count.
+
+## Subscription Overview
+
+List the subscriptions and their purpose (if inferable from names).
+
+## Resource Inventory
+
+### Compute Resources
+
+Analyse VMs (sizes, states, distribution), App Services, Functions, and container resources.
+- Note any over-provisioned or right-sizing opportunities
+- Highlight stopped VMs that could be deallocated
+
+### Networking
+
+Analyse VNets, NSGs, load balancers, and public IPs.
+- Comment on network architecture
+- Note any security considerations
+
+### Storage & Databases
+
+Analyse storage accounts and database resources.
+- Note storage tier usage
+- Comment on database deployment patterns
+
+## Architecture Observations
+
+Comment on:
+- Multi-region deployment (or lack thereof)
+- Redundancy and availability
+- Naming conventions
+- Resource organisation
+
+## Cost Optimisation Opportunities
+
+Based on the inventory, suggest:
+- Right-sizing opportunities (stopped VMs, underutilised resources)
+- Reserved instance candidates
+- Storage tier optimisation
+- Orphaned resources
+
+## Security Observations
+
+Analyse key vaults and security recommendations (if available).
+- Note any critical security gaps
+- Recommend security improvements
+
+## Recommendations Roadmap
+
+### Immediate (0-30 days)
+
+List 3-5 quick wins based on the inventory.
+
+### Short-term (1-3 months)
+
+List 3-5 important improvements.
+
+### Medium-term (3-6 months)
+
+List 2-3 strategic enhancements.
+
+## Conclusion
+
+Summarise key takeaways and next steps for the MSP engagement.
+
+---
+
+Be specific - reference actual resource counts and types. Use blank lines for readability."""
+
+
+def _zerotrust_prompt(data: dict, zt_data: dict = None) -> str:
+    """Build the LLM prompt for Zero Trust analysis."""
+    # Extract basic metrics from our custom collection
+    metadata = data.get("metadata", {})
+    identity = data.get("identity", {})
+    devices = data.get("devices", {})
+    applications = data.get("applications", {})
+    network = data.get("network", {})
+    security_score = data.get("securityScore", {})
+
+    ca_policies = identity.get("conditionalAccess", [])
+    priv_access = identity.get("privilegedAccess", {})
+    device_summary = devices.get("summary", {})
+    named_locations = network.get("namedLocations", [])
+
+    # Build basic summary
+    summary = f"""## Tenant Information
+- Tenant: {metadata.get('tenantName', 'Unknown')}
+- Assessment Date: {metadata.get('assessmentDate', 'Unknown')}
+
+## Microsoft Secure Score
+- Current Score: {security_score.get('currentScore', 'N/A')} / {security_score.get('maxScore', 'N/A')}
+- Percentage: {security_score.get('percentage', 'N/A')}%
+
+## Basic Metrics (from Graph API)
+- Conditional Access Policies: {len(ca_policies)}
+- Global Administrators: {priv_access.get('globalAdminCount', 'N/A')}
+- Managed Devices: {device_summary.get('totalDevices', 0)} ({device_summary.get('compliant', 0)} compliant)
+- Enterprise Applications: {applications.get('enterpriseApps', {}).get('total', 'N/A')}
+- App Protection Policies: {len(applications.get('appProtection', []))}
+- Named Locations: {len(named_locations)}
+"""
+
+    # If we have detailed Microsoft ZT assessment data, add it
+    detailed_findings = ""
+    if zt_data:
+        test_summary = zt_data.get("TestResultSummary", {})
+        tests = zt_data.get("Tests", [])
+
+        # Categorize tests by status
+        failed_tests = [t for t in tests if t.get("TestStatus") == "Failed"]
+        passed_tests = [t for t in tests if t.get("TestStatus") == "Passed"]
+        investigate_tests = [t for t in tests if t.get("TestStatus") == "Investigate"]
+
+        # Group failed tests by category for better analysis
+        categories = {}
+        for t in failed_tests:
+            cat = t.get("TestCategory", "Other")
+            if cat not in categories:
+                categories[cat] = []
+            categories[cat].append(t)
+
+        detailed_findings = f"""
+## Microsoft Zero Trust Assessment Results
+
+### Test Summary
+- **Identity Pillar**: {test_summary.get('IdentityPassed', 0)} passed / {test_summary.get('IdentityTotal', 0)} total ({round(test_summary.get('IdentityPassed', 0) / max(test_summary.get('IdentityTotal', 1), 1) * 100)}% pass rate)
+- **Devices Pillar**: {test_summary.get('DevicesPassed', 0)} passed / {test_summary.get('DevicesTotal', 0)} total ({round(test_summary.get('DevicesPassed', 0) / max(test_summary.get('DevicesTotal', 1), 1) * 100)}% pass rate)
+- **Total Failed Tests**: {len(failed_tests)}
+- **Tests Requiring Investigation**: {len(investigate_tests)}
+
+### Failed Tests by Category
+"""
+        # Add failed tests grouped by category
+        for category, cat_tests in sorted(categories.items(), key=lambda x: len(x[1]), reverse=True):
+            detailed_findings += f"\n#### {category} ({len(cat_tests)} failures)\n"
+            for test in cat_tests[:5]:  # Limit to 5 per category
+                pillar = test.get("TestPillar", "")
+                title = test.get("TestTitle", "Unknown")
+                risk = test.get("TestRisk", "Unknown")
+                result = test.get("TestResult", "")[:150].replace("\n", " ")  # Truncate
+                detailed_findings += f"- **[{risk}]** {title}\n"
+                if result:
+                    detailed_findings += f"  - Finding: {result}\n"
+            if len(cat_tests) > 5:
+                detailed_findings += f"  - ... and {len(cat_tests) - 5} more in this category\n"
+
+        # Add tests needing investigation
+        if investigate_tests:
+            detailed_findings += f"\n### Tests Requiring Investigation\n"
+            for test in investigate_tests[:5]:
+                detailed_findings += f"- {test.get('TestTitle', '')} ({test.get('TestCategory', '')})\n"
+
+    return f"""You are a Microsoft 365 security expert performing a Zero Trust assessment for an MSP client.
+
+Analyse the following tenant configuration data and provide a structured Zero Trust maturity assessment.
+
+{summary}
+{detailed_findings}
+
+---
+
+CRITICAL FORMATTING RULES:
+1. Use proper Markdown with # for main heading, ## for sections, ### for subsections
+2. Add a BLANK LINE before and after every heading and bullet list
+3. Do NOT repeat sections - each section should appear ONCE only
+4. Reference SPECIFIC failed tests from the data above in your analysis
+
+Generate the report in this EXACT structure:
+
+# Zero Trust Assessment Report
+
+## Executive Summary
+
+Write 2-3 paragraphs about the tenant's Zero Trust posture and maturity level (Initial/Developing/Defined/Managed/Optimised). Reference the test pass/fail ratios.
+
+## Assessment by Category
+
+### Access Control
+
+Analyse Conditional Access, MFA, and access control failures. Reference specific test failures.
+- **Risk Level**: Critical/High/Medium/Low
+
+### Credential Management
+
+Analyse password policies, credential protection, and authentication methods.
+- **Risk Level**: Critical/High/Medium/Low
+
+### Privileged Access
+
+Analyse admin accounts, role assignments, and privileged identity management.
+- **Risk Level**: Critical/High/Medium/Low
+
+### Device Management
+
+Analyse device compliance, MDM, and endpoint protection.
+- **Risk Level**: Critical/High/Medium/Low
+
+### Application Security
+
+Analyse app protection, OAuth governance, and enterprise app configuration.
+- **Risk Level**: Critical/High/Medium/Low
+
+### Data Protection
+
+Analyse sensitivity labels, DLP, and data classification.
+- **Risk Level**: Critical/High/Medium/Low
+
+## Critical Findings
+
+List the TOP 10 most critical security gaps from the failed tests, ordered by risk level (High risk first).
+
+## Recommendations Roadmap
+
+### Immediate (0-30 days)
+
+List 3-5 quick wins based on the failed tests.
+
+### Short-term (1-3 months)
+
+List 3-5 important improvements.
+
+### Medium-term (3-6 months)
+
+List 2-3 strategic enhancements.
+
+## Conclusion
+
+Summarise key takeaways and next steps.
+
+---
+
+Be specific - reference the actual test failures. Use blank lines for readability."""
+
+
+# ── startup ─────────────────────────────────────────
+
+def _open_browser():
+    import time
+    time.sleep(1)
+    webbrowser.open("http://127.0.0.1:5000")
+
+
+if __name__ == "__main__":
+    if os.geteuid() != 0:
+        print("[!] nmap requires root for OS detection (-O).")
+        print("    Run with: sudo venv/bin/python app.py")
+        sys.exit(1)
+
+    print("[*] Discovery Tool → http://127.0.0.1:5000")
+    threading.Thread(target=_open_browser, daemon=True).start()
+    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)

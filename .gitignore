@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+*.egg-info/
+
+# Environment
+.env
+*.local
+.claude/
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Client data (sensitive - don't commit)
+*/AzureInventory/
+*/ZeroTrustReport/
+*_report_*.md
+*_report_*.json
+*.xlsx
+*.xml
+
+# Logs
+*.log
