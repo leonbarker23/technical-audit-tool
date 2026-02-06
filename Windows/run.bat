@@ -1,6 +1,12 @@
 @echo off
 setlocal enabledelayedexpansion
 
+:: Keep window open on any error
+if "%1"=="" (
+    cmd /k "%~f0" run
+    exit /b
+)
+
 :: Change to the directory where this script is located
 :: (Running as Admin defaults to C:\Windows\System32)
 cd /d "%~dp0"
@@ -244,14 +250,19 @@ echo ============================================
 echo   All dependencies ready - Starting app...
 echo ============================================
 echo.
+echo [*] About to run: %PYTHON% "%~dp0app.py"
+echo.
 
 :: Open browser after server starts (wait 5 seconds for Flask to initialize)
 start "" cmd /c "timeout /t 5 /nobreak >nul && start http://127.0.0.1:5000"
 
 %PYTHON% "%~dp0app.py"
+set EXITCODE=%errorlevel%
 
 echo.
 echo ============================================
-echo   App exited. See any errors above.
+echo   App exited with code: %EXITCODE%
 echo ============================================
-pause
+echo.
+echo Press any key to close...
+pause >nul
