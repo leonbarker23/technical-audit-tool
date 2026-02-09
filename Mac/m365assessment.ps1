@@ -468,10 +468,21 @@ try {
     # MFA Registration Status (using beta endpoint for auth method registration)
     try {
         # Try the newer authentication methods user registration details endpoint
-        $mfaReport = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/beta/reports/authenticationMethods/userRegistrationDetails" -OutputType PSObject
-        if ($mfaReport.value) {
-            $mfaRegistered = ($mfaReport.value | Where-Object { $_.isMfaRegistered -eq $true }).Count
-            $total = $mfaReport.value.Count
+        # Use pagination to get all results
+        $allMfaUsers = @()
+        $mfaUri = "https://graph.microsoft.com/beta/reports/authenticationMethods/userRegistrationDetails?`$top=999"
+
+        do {
+            $mfaReport = Invoke-MgGraphRequest -Method GET -Uri $mfaUri -OutputType PSObject
+            if ($mfaReport.value) {
+                $allMfaUsers += $mfaReport.value
+            }
+            $mfaUri = $mfaReport.'@odata.nextLink'
+        } while ($mfaUri)
+
+        if ($allMfaUsers.Count -gt 0) {
+            $mfaRegistered = ($allMfaUsers | Where-Object { $_.isMfaRegistered -eq $true }).Count
+            $total = $allMfaUsers.Count
             $assessmentData.identity.mfaStatus = @{
                 registered = $mfaRegistered
                 total = $total
