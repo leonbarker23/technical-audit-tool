@@ -312,6 +312,22 @@ See `Windows/requirements.txt` for Python packages.
 
 ## Changelog
 
+### 2026-02-09
+- **Filtered free licenses from M365 report** — Free/trial licenses no longer clutter the AI analysis
+  - Filters out: Power BI Free, Flow Free, Teams Exploratory, PowerApps Viral, etc.
+  - LLM prompt now explicitly notes that only paid licenses are included
+- **Improved Maester report handling**
+  - Increased character limit from 15k to 20k for fuller report inclusion
+  - Clearer prompt instructions emphasising Maester as PRIMARY source for security findings
+  - Fixed UTF-8 encoding error when reading Maester markdown on Windows
+- **Fixed Microsoft Graph module version conflicts**
+  - Detects version mismatches between Graph modules before connecting
+  - Auto-updates mismatched modules to get them in sync
+  - Force-imports all Graph modules upfront to avoid assembly conflicts
+- **Fixed MFA registration pagination warning**
+  - Added proper pagination handling for userRegistrationDetails endpoint
+  - Now returns accurate MFA counts for large tenants (1000+ users)
+
 ### 2026-02-06 (Update 5)
 - **M365 Assessment mirrored to Windows** — Full implementation now available on both platforms
   - Added `m365assessment.ps1` to Windows folder
