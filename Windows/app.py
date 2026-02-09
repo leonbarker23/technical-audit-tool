@@ -990,13 +990,25 @@ def _m365assessment_prompt(data: dict, maester_md_content: str = None) -> str:
     governance = data.get("governance", {})
     maester = data.get("maester", {})
 
-    # Build license summary
+    # Build license summary - filter out free/trial licenses that clutter the report
     skus = licensing.get("subscribedSkus", [])
+    # Common free license SKUs that don't require analysis
+    free_license_patterns = [
+        "FREE", "FLOW_FREE", "POWER_BI_STANDARD", "POWER_AUTOMATE_FREE",
+        "POWERAPPS_VIRAL", "TEAMS_EXPLORATORY", "RIGHTSMANAGEMENT_ADHOC",
+        "WINDOWS_STORE", "STREAM", "MICROSOFT_BUSINESS_CENTER",
+        "CCIBOTS_PRIVPREV_VIRAL", "FORMS_PRO", "PROJECT_MADEIRA_PREVIEW_IW",
+        "CDS_O365_P1", "CDS_O365_P2", "CDS_O365_P3", "PBI_AZURE_UNAVAILABLE"
+    ]
+    paid_skus = [s for s in skus if not any(
+        pattern in (s.get('skuPartNumber', '') or '').upper()
+        for pattern in free_license_patterns
+    )]
     license_summary = ""
-    if skus:
+    if paid_skus:
         license_summary = "\n".join([
             f"- {s.get('skuPartNumber', 'Unknown')}: {s.get('consumedUnits', 0)} / {s.get('prepaidUnits', 0)} assigned"
-            for s in skus[:15]
+            for s in paid_skus[:15]
         ])
 
     # Build CA policy summary
@@ -1084,8 +1096,9 @@ Analyse the following M365 tenant data and provide a structured assessment repor
 - Licensed Users: {licensing.get('licensedUsers', 0)}
 - Guest Users: {licensing.get('guestUsers', 0)}
 
-## License Inventory
+## License Inventory (Paid Licenses Only)
 {license_summary}
+Note: Free licenses (Power BI Free, Flow Free, Teams Exploratory, etc.) have been filtered out. Focus analysis on paid SKUs only.
 
 ## Microsoft Secure Score
 - Current Score: {security_score.get('currentScore', 0)} / {security_score.get('maxScore', 0)}
@@ -1118,10 +1131,10 @@ Analyse the following M365 tenant data and provide a structured assessment repor
 {maester_summary}
 {maester_findings}
 {f'''
-## Maester Security Report (Full Details)
-The following is the complete Maester security test report. Use this to identify themes and patterns - DO NOT list every individual test result.
+## Maester Security Test Results (Full Report)
+IMPORTANT: The following is the ACTUAL Maester security test output. This is your PRIMARY source for security findings. Use this to identify themes and patterns across the test results - DO NOT list every individual test.
 
-{maester_md_content[:15000] if maester_md_content and len(maester_md_content) > 15000 else maester_md_content if maester_md_content else "Maester report not available."}
+{maester_md_content[:20000] if maester_md_content and len(maester_md_content) > 20000 else maester_md_content if maester_md_content else "Maester report not available."}
 ''' if maester_md_content else ''}
 
 ---
