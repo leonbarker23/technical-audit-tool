@@ -1169,13 +1169,23 @@ Comment on license utilisation and any gaps (e.g., missing security add-ons, und
 ## 2. Identity & Access Management
 
 ### MFA Status
-- State the exact MFA registration percentage and user counts
-- Assess whether this is adequate
+- **Registration**: State the exact MFA registration percentage and user counts (how many users HAVE registered an MFA method)
+- **Enforcement**: State how MFA is being enforced:
+  - "Security Defaults" = MFA required for all users via Security Defaults
+  - "Conditional Access (all users)" = CA policy requiring MFA covers all users and all apps
+  - "Conditional Access (partial)" = CA policies require MFA but don't cover everyone
+  - "None detected" = No policies requiring MFA found
+- If enforcement is partial, list which CA policies require MFA and what they cover
+- **Gap Analysis**: Compare registration vs enforcement:
+  - High registration + strong enforcement = Good
+  - High registration + weak enforcement = Users ready but not required to use MFA
+  - Low registration + strong enforcement = Users will be prompted to register at next sign-in
+  - Low registration + weak enforcement = Critical gap
 - **Risk Level**: Critical/High/Medium/Low
 
 ### Conditional Access
 - State the number of policies (total and enabled)
-- Comment on policy coverage and gaps
+- Comment on policy coverage and gaps beyond MFA
 - **Risk Level**: Critical/High/Medium/Low
 
 ### Privileged Access

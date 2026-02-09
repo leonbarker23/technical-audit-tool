@@ -252,6 +252,7 @@ try {
         }
         identity = @{
             conditionalAccess = @()
+            mfaEnforcement = @{}
             authenticationMethods = @{}
             mfaStatus = @{}
             sspr = @{}
@@ -440,6 +441,120 @@ try {
         })
         $enabledCount = ($caPolicies | Where-Object { $_.State -eq "enabled" }).Count
         Write-Status "  Found $($caPolicies.Count) CA policies ($enabledCount enabled)" "SUCCESS"
+
+        # Analyse MFA enforcement from CA policies
+        $mfaPolicies = @()
+        $enabledCaPolicies = $caPolicies | Where-Object { $_.State -eq "enabled" }
+
+        foreach ($policy in $enabledCaPolicies) {
+            $requiresMfa = $false
+            $grantControls = $policy.GrantControls
+
+            # Check if policy requires MFA
+            if ($grantControls.BuiltInControls -contains "mfa") {
+                $requiresMfa = $true
+            }
+            # Also check for authentication strength that requires MFA
+            if ($grantControls.AuthenticationStrength.Id) {
+                $requiresMfa = $true
+            }
+
+            if ($requiresMfa) {
+                # Determine user scope
+                $userScope = "Unknown"
+                $users = $policy.Conditions.Users
+
+                if ($users.IncludeUsers -contains "All") {
+                    if ($users.ExcludeUsers.Count -gt 0 -or $users.ExcludeGroups.Count -gt 0) {
+                        $userScope = "All users (with exclusions)"
+                    } else {
+                        $userScope = "All users"
+                    }
+                } elseif ($users.IncludeGroups.Count -gt 0) {
+                    $userScope = "Specific groups ($($users.IncludeGroups.Count) groups)"
+                } elseif ($users.IncludeUsers.Count -gt 0) {
+                    $userScope = "Specific users ($($users.IncludeUsers.Count) users)"
+                } elseif ($users.IncludeRoles.Count -gt 0) {
+                    $userScope = "Specific roles ($($users.IncludeRoles.Count) roles)"
+                }
+
+                # Determine app scope
+                $appScope = "Unknown"
+                $apps = $policy.Conditions.Applications
+
+                if ($apps.IncludeApplications -contains "All") {
+                    if ($apps.ExcludeApplications.Count -gt 0) {
+                        $appScope = "All apps (with exclusions)"
+                    } else {
+                        $appScope = "All apps"
+                    }
+                } elseif ($apps.IncludeApplications.Count -gt 0) {
+                    $appScope = "Specific apps ($($apps.IncludeApplications.Count) apps)"
+                }
+
+                # Check for conditions that limit when MFA applies
+                $conditions = @()
+                if ($policy.Conditions.Locations.IncludeLocations -and $policy.Conditions.Locations.IncludeLocations -notcontains "All") {
+                    $conditions += "Location-based"
+                }
+                if ($policy.Conditions.Platforms.IncludePlatforms -and $policy.Conditions.Platforms.IncludePlatforms -notcontains "all") {
+                    $conditions += "Platform-specific"
+                }
+                if ($policy.Conditions.SignInRiskLevels.Count -gt 0) {
+                    $conditions += "Risk-based"
+                }
+                if ($policy.Conditions.UserRiskLevels.Count -gt 0) {
+                    $conditions += "User risk-based"
+                }
+
+                $mfaPolicies += @{
+                    policyName = $policy.DisplayName
+                    userScope = $userScope
+                    appScope = $appScope
+                    conditions = if ($conditions.Count -gt 0) { $conditions -join ", " } else { "Always (no conditions)" }
+                    includesAllUsers = ($users.IncludeUsers -contains "All")
+                    includesAllApps = ($apps.IncludeApplications -contains "All")
+                }
+            }
+        }
+
+        # Check for Security Defaults
+        $securityDefaultsEnabled = $false
+        try {
+            $securityDefaults = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/policies/identitySecurityDefaultsEnforcementPolicy" -OutputType PSObject
+            $securityDefaultsEnabled = $securityDefaults.isEnabled
+        } catch {
+            # Security defaults check failed, assume not enabled
+        }
+
+        # Determine overall MFA enforcement status
+        $hasUniversalMfa = ($mfaPolicies | Where-Object { $_.includesAllUsers -and $_.includesAllApps }).Count -gt 0
+
+        $assessmentData.identity.mfaEnforcement = @{
+            securityDefaultsEnabled = $securityDefaultsEnabled
+            caPoliciesRequiringMfa = $mfaPolicies.Count
+            policies = $mfaPolicies
+            hasUniversalMfaPolicy = $hasUniversalMfa
+            enforcementMethod = if ($securityDefaultsEnabled) {
+                "Security Defaults"
+            } elseif ($hasUniversalMfa) {
+                "Conditional Access (all users)"
+            } elseif ($mfaPolicies.Count -gt 0) {
+                "Conditional Access (partial)"
+            } else {
+                "None detected"
+            }
+        }
+
+        if ($securityDefaultsEnabled) {
+            Write-Status "  MFA enforcement: Security Defaults enabled (all users)" "SUCCESS"
+        } elseif ($hasUniversalMfa) {
+            Write-Status "  MFA enforcement: CA policy covers all users" "SUCCESS"
+        } elseif ($mfaPolicies.Count -gt 0) {
+            Write-Status "  MFA enforcement: $($mfaPolicies.Count) CA policies require MFA (partial coverage)" "WARNING"
+        } else {
+            Write-Status "  MFA enforcement: No MFA-requiring policies detected" "WARNING"
+        }
     }
     catch {
         Write-Status "  Could not retrieve CA policies: $_" "WARNING"
