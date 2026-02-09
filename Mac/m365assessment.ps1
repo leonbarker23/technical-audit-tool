@@ -78,8 +78,29 @@ if (-not $SkipMaester) {
     )
 }
 
+# Check for module version conflicts and update if needed
+$graphModules = $requiredModules | Where-Object { $_ -like 'Microsoft.Graph.*' }
+$needsUpdate = $false
+
+# Check if Microsoft.Graph.Authentication is installed
+$authModule = Get-Module -ListAvailable -Name 'Microsoft.Graph.Authentication' | Sort-Object Version -Descending | Select-Object -First 1
+if ($authModule) {
+    $authVersion = $authModule.Version
+    # Check if other Graph modules have mismatched versions
+    foreach ($module in $graphModules) {
+        $installed = Get-Module -ListAvailable -Name $module | Sort-Object Version -Descending | Select-Object -First 1
+        if ($installed -and $installed.Version -ne $authVersion) {
+            Write-Status "Module version mismatch detected: $module ($($installed.Version)) vs Authentication ($authVersion)" "WARNING"
+            $needsUpdate = $true
+            break
+        }
+    }
+}
+
+# Install/update modules
 foreach ($module in $requiredModules) {
-    if (-not (Get-Module -ListAvailable -Name $module)) {
+    $installed = Get-Module -ListAvailable -Name $module
+    if (-not $installed) {
         Write-Status "Installing $module..." "INFO"
         try {
             Install-Module $module -Scope CurrentUser -Force -AllowClobber -Repository PSGallery
@@ -87,6 +108,33 @@ foreach ($module in $requiredModules) {
         catch {
             Write-Status "Failed to install $module - $_" "WARNING"
         }
+    }
+    elseif ($needsUpdate -and $module -like 'Microsoft.Graph.*') {
+        Write-Status "Updating $module to fix version mismatch..." "INFO"
+        try {
+            Update-Module $module -Force -ErrorAction SilentlyContinue
+        }
+        catch {
+            # Try reinstalling if update fails
+            try {
+                Install-Module $module -Scope CurrentUser -Force -AllowClobber -Repository PSGallery
+            }
+            catch {
+                Write-Status "Could not update $module - $_" "WARNING"
+            }
+        }
+    }
+}
+
+# Import all Microsoft.Graph modules upfront to avoid version conflicts
+# This ensures all modules are loaded with compatible assembly versions
+Write-Status "Loading Microsoft Graph modules..."
+foreach ($module in $graphModules) {
+    try {
+        Import-Module $module -Force -ErrorAction Stop
+    }
+    catch {
+        Write-Status "Warning: Could not import $module - $_" "WARNING"
     }
 }
 
