@@ -647,37 +647,44 @@ try {
 
     Write-Status "Collecting SharePoint data..."
     try {
-        # Get SharePoint usage report - save to temp file then parse
+        # Get SharePoint site usage detail report - this gives accurate site count AND storage
         # Use cross-platform temp directory (macOS doesn't have $env:TEMP)
         $tempDir = if ($env:TEMP) { $env:TEMP } elseif ($env:TMPDIR) { $env:TMPDIR } else { "/tmp" }
         $tempCsvPath = Join-Path $tempDir "sp_usage_$(Get-Random).csv"
         try {
-            Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/reports/getSharePointSiteUsageStorage(period='D7')" -OutputFilePath $tempCsvPath
+            # Use getSharePointSiteUsageDetail for accurate site count (not Get-MgSite which only returns accessible sites)
+            Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/reports/getSharePointSiteUsageDetail(period='D7')" -OutputFilePath $tempCsvPath
 
             if (Test-Path $tempCsvPath) {
                 $csvData = Import-Csv $tempCsvPath
                 if ($csvData) {
-                    # Get the most recent entry (last row)
-                    $latestData = $csvData | Select-Object -Last 1
-                    $storageBytes = [long]($latestData.'Storage Used (Byte)' -replace '[^\d]', '')
-                    $assessmentData.sharepoint.storageUsed = $storageBytes
+                    # Count all sites from the report
+                    $assessmentData.sharepoint.siteCount = $csvData.Count
+
+                    # Sum total storage used across all sites
+                    $totalStorageBytes = ($csvData | ForEach-Object {
+                        [long]($_.'Storage Used (Byte)' -replace '[^\d]', '')
+                    } | Measure-Object -Sum).Sum
+                    $assessmentData.sharepoint.storageUsed = $totalStorageBytes
+
+                    # Sum allocated storage
+                    $totalAllocatedBytes = ($csvData | ForEach-Object {
+                        [long]($_.'Storage Allocated (Byte)' -replace '[^\d]', '')
+                    } | Measure-Object -Sum).Sum
+                    $assessmentData.sharepoint.storageAllocated = $totalAllocatedBytes
                 }
                 Remove-Item $tempCsvPath -Force -ErrorAction SilentlyContinue
             }
         }
         catch {
-            Write-Status "  Could not retrieve SharePoint storage report" "WARNING"
+            Write-Status "  Could not retrieve SharePoint usage report: $_" "WARNING"
             Remove-Item $tempCsvPath -Force -ErrorAction SilentlyContinue
         }
-
-        # Get site count
-        $sites = Get-MgSite -All -Property Id
-        $assessmentData.sharepoint.siteCount = $sites.Count
 
         $storageGB = if ($assessmentData.sharepoint.storageUsed -gt 0) {
             [math]::Round($assessmentData.sharepoint.storageUsed / 1GB, 2)
         } else { 0 }
-        Write-Status "  SharePoint: $($sites.Count) sites, ${storageGB}GB used" "SUCCESS"
+        Write-Status "  SharePoint: $($assessmentData.sharepoint.siteCount) sites, ${storageGB}GB used" "SUCCESS"
     }
     catch {
         Write-Status "  Could not retrieve SharePoint data: $_" "WARNING"

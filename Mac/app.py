@@ -1061,9 +1061,9 @@ def _m365assessment_prompt(data: dict, maester_md_content: str = None) -> str:
     # SharePoint storage
     sp_storage_gb = round(sharepoint.get("storageUsed", 0) / (1024**3), 2) if sharepoint.get("storageUsed") else 0
 
-    return f"""You are a Microsoft 365 security consultant performing a comprehensive tenant assessment for an MSP client.
+    return f"""You are a Microsoft 365 technical consultant performing a tenant assessment.
 
-Analyse the following M365 tenant data and provide a structured assessment report.
+Analyse the following M365 tenant data and provide a technical assessment report.
 
 ## Tenant Information
 - Client: {metadata.get('clientName', 'Unknown')}
@@ -1080,7 +1080,16 @@ Analyse the following M365 tenant data and provide a structured assessment repor
 
 ## License Inventory (Paid Licenses Only)
 {license_summary}
-Note: Free licenses (Power BI Free, Flow Free, Teams Exploratory, etc.) have been filtered out. Focus analysis on paid SKUs only.
+IMPORTANT: Report the EXACT license SKU names shown above. Common mappings:
+- SPE_E3 = Microsoft 365 E3
+- SPE_E5 = Microsoft 365 E5
+- SPE_A3 or M365EDU_A3 = Microsoft 365 A3 (Education)
+- SPE_A5 or M365EDU_A5 = Microsoft 365 A5 (Education)
+- ENTERPRISEPACK = Office 365 E3
+- ENTERPRISEPREMIUM = Office 365 E5
+- AAD_PREMIUM_P1 = Entra ID P1
+- AAD_PREMIUM_P2 = Entra ID P2
+Do NOT confuse A3 (Education) with E3 (Enterprise) - they are different license types.
 
 ## Microsoft Secure Score
 - Current Score: {security_score.get('currentScore', 0)} / {security_score.get('maxScore', 0)}
@@ -1114,26 +1123,20 @@ Note: Free licenses (Power BI Free, Flow Free, Teams Exploratory, etc.) have bee
 {maester_findings}
 {f'''
 ## Maester Security Test Results (Full Report)
-IMPORTANT: The following is the ACTUAL Maester security test output. This is your PRIMARY source for security findings. Use this to identify themes and patterns across the test results - DO NOT list every individual test.
+IMPORTANT: The following is the ACTUAL Maester security test output. This is your PRIMARY source for security findings. Identify themes and patterns - DO NOT list every individual test.
 
 {maester_md_content[:20000] if maester_md_content and len(maester_md_content) > 20000 else maester_md_content if maester_md_content else "Maester report not available."}
 ''' if maester_md_content else ''}
 
 ---
 
-You are an MSP (Managed Service Provider) consultant writing a report for a prospective or existing client. Your goal is to:
-1. Identify security gaps and risks that justify ongoing managed services
-2. Highlight project opportunities (remediation work the MSP can sell)
-3. Find upsell opportunities (license upgrades, additional services)
-4. Build trust by demonstrating expertise and thorough analysis
-
 CRITICAL FORMATTING RULES:
 1. Use proper Markdown with # for main heading, ## for sections, ### for subsections
 2. Add a BLANK LINE before and after every heading and bullet list
 3. Do NOT repeat sections - each section should appear ONCE only
 4. Reference SPECIFIC data points from the assessment above
-5. Use severity keywords that will be colour-coded: **Critical**, **High**, **Medium**, **Low**
-6. DO NOT list every Maester test pass/fail - instead identify THEMES and PATTERNS
+5. Use severity keywords: **Critical**, **High**, **Medium**, **Low**
+6. Report license names ACCURATELY - do not confuse A3 (Education) with E3 (Enterprise)
 
 Generate the report in this EXACT structure:
 
@@ -1141,24 +1144,23 @@ Generate the report in this EXACT structure:
 
 ## Executive Summary
 
-Write 2-3 paragraphs summarising:
+2-3 paragraphs covering:
 - Overall security posture and Secure Score ({security_score.get('percentage', 0)}%)
-- Key risk areas requiring immediate attention
-- The value an MSP can provide in managing this environment
+- Key findings and risk areas
+- Current state of the environment
 
 ## Tenant Overview
 
-Brief summary of the environment:
-- {licensing.get('totalUsers', 0)} users, license mix, tenant maturity
-- Key workloads in use (Teams, SharePoint, Intune adoption)
+### Environment Summary
+
+- Total users, license types (use EXACT names from data), tenant age
+- Key workloads: Teams ({teams.get('teamsCount', 0)} teams), SharePoint ({sharepoint.get('siteCount', 0)} sites, {sp_storage_gb} GB), Intune adoption
+
+### Licensing
+
+List the primary licenses in use with counts. Note any licensing gaps or underutilised features.
 
 ## Security Assessment
-
-### Current Security Posture
-
-Analyse the Secure Score and Maester test results together. Identify 3-5 KEY THEMES from the security gaps - do not list individual tests. Examples: "Identity security gaps", "Lack of device compliance", "Missing data protection controls".
-
-- **Overall Risk Level**: Critical/High/Medium/Low
 
 ### Identity & Access Management
 
@@ -1170,59 +1172,39 @@ Analyse:
 
 ### Device Management
 
-Analyse Intune deployment and compliance status.
+Analyse Intune deployment, compliance policies, and device compliance rates.
 - **Risk Level**: Critical/High/Medium/Low
 
 ### Data & Application Security
 
-Review app registrations, enterprise apps, and data protection.
+Review SharePoint/Teams usage, app registrations, enterprise apps.
 - **Risk Level**: Critical/High/Medium/Low
 
-## Project Opportunities
+### Security Test Findings
 
-Identify specific remediation projects the MSP can propose. For each:
-- Brief description of the gap
-- Recommended solution
-- Business impact if not addressed
+Summarise key themes from the Maester security tests. Group findings by category (Identity, Devices, Data, etc.) - do not list individual tests.
 
-Examples: "Conditional Access Implementation", "MFA Rollout", "Intune Enrollment", "Security Baseline Deployment"
+## Recommendations
 
-## License Optimisation
+### Immediate Actions (0-30 days)
 
-Analyse current licenses and recommend:
-- Upgrades that unlock security features (e.g., E3 to E5, adding P2)
-- Potential cost savings from unused licenses
-- Features being paid for but not utilised
-
-## Managed Services Value
-
-Explain how ongoing MSP management would benefit this client:
-- Continuous security monitoring
-- Regular security reviews and Secure Score improvement
-- Incident response readiness
-- Compliance maintenance
-
-## Recommendations Roadmap
-
-### Quick Wins (0-30 days)
-
-5-7 items that can be implemented quickly with high impact.
+5-7 quick wins that address critical gaps.
 
 ### Short-term Projects (1-3 months)
 
-3-5 projects requiring more planning or change management.
+3-5 projects requiring planning or change management.
 
-### Strategic Initiatives (3-12 months)
+### Strategic Initiatives (3-6 months)
 
-2-3 larger initiatives for security maturity.
+2-3 larger initiatives for security maturity improvement.
 
 ## Conclusion
 
-Summarise the engagement opportunity and recommended next steps. End with a clear call to action for the MSP relationship.
+Brief summary of key findings and prioritised next steps.
 
 ---
 
-Be specific - reference actual data points. Focus on business value and actionable recommendations. Use blank lines for readability."""
+Be factual and specific - reference actual data points. Use blank lines for readability."""
 
 
 def _zerotrust_prompt(data: dict, zt_data: dict = None) -> str:
