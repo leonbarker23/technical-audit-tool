@@ -1081,7 +1081,9 @@ def _m365assessment_prompt(data: dict, maester_md_content: str = None) -> str:
 
     return f"""You are a Microsoft 365 technical consultant performing a tenant assessment.
 
-Analyse the following M365 tenant data and provide a technical assessment report.
+Analyse the following M365 tenant data and generate a structured assessment report.
+
+=== RAW DATA FOR ANALYSIS ===
 
 ## Tenant Information
 - Client: {metadata.get('clientName', 'Unknown')}
@@ -1096,9 +1098,10 @@ Analyse the following M365 tenant data and provide a technical assessment report
 - Licensed Users: {licensing.get('licensedUsers', 0)}
 - Guest Users: {licensing.get('guestUsers', 0)}
 
-## License Inventory (Paid Licenses Only)
+## License Inventory (Paid Licenses Only - free SKUs excluded)
 {license_summary}
-IMPORTANT: Report the EXACT license SKU names shown above. Common mappings:
+
+LICENSE SKU REFERENCE (use these EXACT mappings):
 - SPE_E3 = Microsoft 365 E3
 - SPE_E5 = Microsoft 365 E5
 - SPE_A3 or M365EDU_A3 = Microsoft 365 A3 (Education)
@@ -1107,7 +1110,18 @@ IMPORTANT: Report the EXACT license SKU names shown above. Common mappings:
 - ENTERPRISEPREMIUM = Office 365 E5
 - AAD_PREMIUM_P1 = Entra ID P1
 - AAD_PREMIUM_P2 = Entra ID P2
-Do NOT confuse A3 (Education) with E3 (Enterprise) - they are different license types.
+- EMS = Enterprise Mobility + Security
+- ATP_ENTERPRISE = Microsoft Defender for Office 365
+- INTUNE_A = Microsoft Intune
+Do NOT confuse A3/A5 (Education) with E3/E5 (Enterprise).
+
+## MFA Status
+- Registered: {identity.get('mfaStatus', {}).get('registered', 'N/A')} / {identity.get('mfaStatus', {}).get('total', 'N/A')} users
+- Percentage: {identity.get('mfaStatus', {}).get('percentage', 'N/A')}%
+
+## Conditional Access
+- Total Policies: {len(ca_policies)}
+- Enabled Policies: {len(enabled_policies)}
 
 ## Microsoft Secure Score
 - Current Score: {security_score.get('currentScore', 0)} / {security_score.get('maxScore', 0)}
@@ -1115,9 +1129,7 @@ Do NOT confuse A3 (Education) with E3 (Enterprise) - they are different license 
 - Identity Score: {security_score.get('identityScore', {}).get('percentage', 'N/A')}%
 {rec_summary}
 
-## Identity & Access
-- Conditional Access Policies: {ca_summary}
-- MFA Registration: {identity.get('mfaStatus', {}).get('registered', 'N/A')} / {identity.get('mfaStatus', {}).get('total', 'N/A')} ({identity.get('mfaStatus', {}).get('percentage', 'N/A')}%)
+## Privileged Access
 - Global Administrators: {identity.get('privilegedAccess', {}).get('globalAdminCount', 'N/A')}
 - Active Directory Roles: {identity.get('privilegedAccess', {}).get('directoryRolesActive', 'N/A')}
 - Named Locations: {len(governance.get('namedLocations', []))}
@@ -1141,20 +1153,21 @@ Do NOT confuse A3 (Education) with E3 (Enterprise) - they are different license 
 {maester_findings}
 {f'''
 ## Maester Security Test Results (Full Report)
-IMPORTANT: The following is the ACTUAL Maester security test output. This is your PRIMARY source for security findings. Identify themes and patterns - DO NOT list every individual test.
+This is the ACTUAL Maester security test output - use this to identify security gaps and themes.
 
 {maester_md_content[:20000] if maester_md_content and len(maester_md_content) > 20000 else maester_md_content if maester_md_content else "Maester report not available."}
 ''' if maester_md_content else ''}
 
+=== END RAW DATA ===
+
 ---
 
-CRITICAL FORMATTING RULES:
-1. Use proper Markdown with # for main heading, ## for sections, ### for subsections
+CRITICAL INSTRUCTIONS:
+1. Use proper Markdown: # for main heading, ## for sections, ### for subsections
 2. Add a BLANK LINE before and after every heading and bullet list
-3. Do NOT repeat sections - each section should appear ONCE only
-4. Reference SPECIFIC data points from the assessment above
+3. Do NOT repeat sections - each section appears ONCE only
+4. Include SPECIFIC numbers from the data above
 5. Use severity keywords: **Critical**, **High**, **Medium**, **Low**
-6. Report license names ACCURATELY - do not confuse A3 (Education) with E3 (Enterprise)
 
 Generate the report in this EXACT structure:
 
@@ -1162,67 +1175,79 @@ Generate the report in this EXACT structure:
 
 ## Executive Summary
 
-2-3 paragraphs covering:
-- Overall security posture and Secure Score ({security_score.get('percentage', 0)}%)
-- Key findings and risk areas
-- Current state of the environment
+2-3 paragraphs providing a high-level overview of the tenant's security posture, key risks identified, and overall maturity level.
 
-## Tenant Overview
+## 1. Licensing Overview
 
-### Environment Summary
+List ALL paid licenses with their exact counts in a table or bullet list format:
+- License name (translated from SKU): X assigned / Y available
 
-- Total users, license types (use EXACT names from data), tenant age
-- Key workloads: Teams ({teams.get('teamsCount', 0)} teams), SharePoint ({sharepoint.get('siteCount', 0)} sites, {sp_storage_gb} GB), Intune adoption
+Comment on license utilisation and any gaps (e.g., missing security add-ons, underutilised features).
 
-### Licensing
+## 2. Identity & Access Management
 
-List the primary licenses in use with counts. Note any licensing gaps or underutilised features.
-
-## Security Assessment
-
-### Identity & Access Management
-
-Analyse:
-- MFA adoption ({identity.get('mfaStatus', {}).get('percentage', 'N/A')}% registered)
-- Conditional Access policies ({len(enabled_policies)} enabled)
-- Privileged access ({identity.get('privilegedAccess', {}).get('globalAdminCount', 0)} Global Admins)
+### MFA Status
+- State the exact MFA registration percentage and user counts
+- Assess whether this is adequate
 - **Risk Level**: Critical/High/Medium/Low
 
-### Device Management
-
-Analyse Intune deployment, compliance policies, and device compliance rates.
+### Conditional Access
+- State the number of policies (total and enabled)
+- Comment on policy coverage and gaps
 - **Risk Level**: Critical/High/Medium/Low
 
-### Data & Application Security
-
-Review SharePoint/Teams usage, app registrations, enterprise apps.
+### Privileged Access
+- State the exact number of Global Administrators
+- List the top admin roles and member counts
+- Assess whether this follows least-privilege principles
 - **Risk Level**: Critical/High/Medium/Low
 
-### Security Test Findings
+## 3. Microsoft Secure Score
 
-Summarise key themes from the Maester security tests. Group findings by category (Identity, Devices, Data, etc.) - do not list individual tests.
+- Current Score: X / Y (Z%)
+- Identity Score: X%
 
-## Recommendations
+### Top 10 Recommendations
+List all 10 recommendations from the data with their point values. For each, briefly note the impact.
+
+## 4. Security Test Findings (Maester)
+
+Summarise the key themes and patterns from the Maester security tests:
+- Group findings by category (Identity, Devices, Data Protection, etc.)
+- Highlight the most critical failures
+- Do NOT list every individual test - focus on patterns and themes
+- **Overall Security Risk**: Critical/High/Medium/Low
+
+## 5. Project Recommendations
 
 ### Immediate Actions (0-30 days)
-
-5-7 quick wins that address critical gaps.
+5-7 quick wins that can be implemented immediately to address critical gaps.
 
 ### Short-term Projects (1-3 months)
+3-5 projects requiring planning, testing, or change management.
 
-3-5 projects requiring planning or change management.
+### Strategic Roadmap (3-12 months)
+2-3 larger initiatives for long-term security maturity improvement.
 
-### Strategic Initiatives (3-6 months)
+## 6. Discussion Points
 
-2-3 larger initiatives for security maturity improvement.
+Key topics for client conversation:
+- Security gaps that pose business risk
+- License optimisation opportunities (upgrades that unlock features, or cost savings)
+- Compliance considerations
+- Value of ongoing security management and monitoring
+- Quick wins vs. larger transformation projects
 
-## Conclusion
+## 7. Conclusion
 
-Brief summary of key findings and prioritised next steps.
+Brief summary of:
+- Current state assessment
+- Top 3 priorities
+- Recommended next steps
 
 ---
 
-Be factual and specific - reference actual data points. Use blank lines for readability."""
+Be specific with numbers. Reference actual data points. Use blank lines for readability."""
 
 
 def _zerotrust_prompt(data: dict, zt_data: dict = None) -> str:
