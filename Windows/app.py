@@ -918,7 +918,7 @@ def m365assessment():
             maester_md_content = None
             if maester_md_file and os.path.exists(os.path.join(BASE_DIR, maester_md_file)):
                 try:
-                    with open(os.path.join(BASE_DIR, maester_md_file), "r") as f:
+                    with open(os.path.join(BASE_DIR, maester_md_file), "r", encoding="utf-8", errors="replace") as f:
                         maester_md_content = f.read()
                     yield sse("Loaded Maester security report for analysis...", event="status")
                 except Exception as e:
