@@ -727,7 +727,7 @@ try {
     # ── Save JSON output ─────────────────────────────────────────────────────
 
     Write-Status "Saving assessment data..."
-    $assessmentData | ConvertTo-Json -Depth 15 -Compress | Out-File -FilePath $jsonPath -Encoding UTF8
+    $assessmentData | ConvertTo-Json -Depth 15 | Out-File -FilePath $jsonPath -Encoding UTF8
     Write-Status "JSON saved: $jsonFile" "SUCCESS"
 
     # ── Run Maester Security Tests ───────────────────────────────────────────
@@ -838,7 +838,7 @@ try {
                 })
 
             # Update JSON with Maester data
-            $assessmentData | ConvertTo-Json -Depth 15 -Compress | Out-File -FilePath $jsonPath -Encoding UTF8
+            $assessmentData | ConvertTo-Json -Depth 15 | Out-File -FilePath $jsonPath -Encoding UTF8
 
             # Find generated files (MaesterReport.html, MaesterReport.json, MaesterReport.md)
             $htmlReport = Get-ChildItem -Path $maesterFolder -Filter "MaesterReport.html" -ErrorAction SilentlyContinue | Select-Object -First 1
