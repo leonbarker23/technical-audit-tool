@@ -779,6 +779,7 @@ def m365assessment():
     client = request.args.get("client", "").strip()
     session_id = request.args.get("session", "").strip()
     skip_maester = request.args.get("skipMaester", "").lower() == "true"
+    update_maester_tests = request.args.get("updateMaesterTests", "").lower() == "true"
 
     if not client or not _CLIENT_RE.match(client):
         return Response(sse("Invalid or missing client name.", event="m365_error"),
@@ -822,6 +823,9 @@ def m365assessment():
 
         if skip_maester:
             cmd.append("-SkipMaester")
+
+        if update_maester_tests:
+            cmd.append("-UpdateMaesterTests")
 
         proc = None
         json_file = None
@@ -907,10 +911,25 @@ def m365assessment():
                     yield sse(f"[!] Could not read Maester report: {e}", event="status")
 
             # Generate AI analysis
-            yield sse("Generating M365 analysis report...", event="status")
+            import time
+
+            # Calculate tenant size for logging
+            total_users = assessment_data.get("licensing", {}).get("totalUsers", 0)
+            tenant_size = "small" if total_users < 100 else "medium" if total_users < 1000 else "large"
+
+            yield sse(f"[*] Tenant size: {total_users} users ({tenant_size})", event="status")
+            yield sse(f"[*] Generating AI analysis report...", event="status")
+            yield sse(f"[*] This may take 2-3 minutes for small tenants, 5-7 for medium, 8-12 for large", event="status")
+            yield sse("")
 
             prompt = _m365assessment_prompt(assessment_data, maester_md_content)
+            prompt_size = len(prompt)
+            yield sse(f"[*] Prompt size: {prompt_size:,} characters (~{prompt_size//4:,} tokens)", event="status")
+
             report_text = ""
+            start_time = time.time()
+            last_progress_time = start_time
+            token_count = 0
 
             try:
                 for chunk in ollama.generate(model="qwen2.5:14b",
@@ -919,7 +938,20 @@ def m365assessment():
                     tok = chunk.get("response", "")
                     if tok:
                         report_text += tok
+                        token_count += 1
                         yield sse(tok, event="report_chunk")
+
+                        # Progress indicator every 10 seconds
+                        current_time = time.time()
+                        if current_time - last_progress_time >= 10:
+                            elapsed = int(current_time - start_time)
+                            yield sse(f"[*] Still generating... ({elapsed}s elapsed, {token_count} tokens)", event="status")
+                            last_progress_time = current_time
+
+                # Final timing
+                elapsed_total = int(time.time() - start_time)
+                yield sse(f"[+] Report generated in {elapsed_total}s ({token_count} tokens, {token_count/elapsed_total:.1f} tok/s)", event="status")
+
             except Exception as exc:
                 yield sse(f"Ollama error: {exc}", event="m365_error")
                 yield sse("Ensure ollama is running and 'qwen2.5:14b' model is available.", event="m365_error")
@@ -965,6 +997,17 @@ def _format_user_insights(data: dict) -> str:
     licensing = data.get("licensing", {})
     total_users = licensing.get("totalUsers", 1) or 1  # Avoid division by zero
 
+    # Adjust detail level based on tenant size (reduce prompt size for large tenants)
+    if total_users < 100:
+        max_stale_users = 10
+        max_domains = 5
+    elif total_users < 1000:
+        max_stale_users = 8
+        max_domains = 5
+    else:  # Large tenants (1000+)
+        max_stale_users = 5
+        max_domains = 3
+
     sections = []
 
     # ── Stale Accounts ──
@@ -1001,7 +1044,7 @@ def _format_user_insights(data: dict) -> str:
         top_stale = stale.get("topStaleWithLicenses", [])
         if top_stale:
             stale_section += "\n\n**Top stale accounts with licenses (priority for cleanup):**"
-            for user in top_stale[:10]:
+            for user in top_stale[:max_stale_users]:
                 stale_section += f"\n- {user.get('displayName', 'Unknown')} - Last sign-in: {user.get('lastSignIn', 'Never')}, Licenses: {user.get('licenseCount', 0)}"
 
         sections.append(stale_section)
@@ -1037,7 +1080,7 @@ def _format_user_insights(data: dict) -> str:
         top_domains = guest.get("topDomains", [])
         if top_domains:
             guest_section += "\n\n**Top external domains:**"
-            for domain in top_domains[:5]:
+            for domain in top_domains[:max_domains]:
                 guest_section += f"\n- {domain.get('domain', 'Unknown')}: {domain.get('count', 0)} guests"
 
         sections.append(guest_section)

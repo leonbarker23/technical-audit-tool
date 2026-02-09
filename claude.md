@@ -121,11 +121,22 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
 
 ### Options
 - **Skip Maester Tests** — Skips Maester security tests (unchecked by default, Maester runs)
+- **Update Maester Tests** — Forces refresh of cached Maester test files (unchecked by default)
+
+### Maester Test Caching
+- **Test files are cached** in a shared `MaesterTests/` folder to speed up assessments
+- **Auto-updates** if cached tests are >30 days old
+- **Version tracking** via `.maester-version` file (stores last update date and module version)
+- **Performance benefit** — Saves ~2-3 minutes per assessment by avoiding test file downloads
+- **Manual refresh** available via "Update Maester Tests" checkbox when needed
 
 ### Duration
-- Small tenants (<100 users): 8-12 minutes (with all connections)
-- Medium tenants (100-1000 users): 12-18 minutes
-- Large tenants (1000+ users): 18-25 minutes
+- **With cached tests** (typical):
+  - Small tenants (<100 users): 5-9 minutes
+  - Medium tenants (100-1000 users): 9-15 minutes
+  - Large tenants (1000+ users): 15-22 minutes
+- **With test update** (first run or manual refresh):
+  - Add 2-3 minutes to above times for test file download
 
 ### Files Generated
 - `m365assessment_YYYY-MM-DD_HH-MM.json` — Raw Graph API assessment data
@@ -311,6 +322,27 @@ See `Windows/requirements.txt` for Python packages.
 ---
 
 ## Changelog
+
+### 2026-02-09 (Update 6)
+- **Added Maester test caching** — Significantly faster M365 assessments through intelligent test file caching
+  - **Shared cache folder**: `MaesterTests/` stores test files across all client assessments
+  - **Version tracking**: `.maester-version` file tracks last update date and module version
+  - **Smart refresh logic**: Auto-updates if tests are >30 days old
+  - **Manual refresh option**: New "Update Maester Tests" checkbox in UI
+  - **Performance improvement**: Saves ~2-3 minutes per assessment (5-9 min vs 8-12 min for small tenants)
+  - **Implemented on both platforms**: Mac and Windows versions now use cached tests
+  - Test results still saved per-client in `<ClientName>/MaesterTests/` folder
+- **Added LLM progress indicators** — Better visibility during AI report generation
+  - **Tenant size detection**: Displays user count and tenant classification (small/medium/large)
+  - **Prompt size logging**: Shows character/token count being sent to LLM
+  - **Time estimates**: Expected duration based on tenant size (2-3 min small, 5-7 min medium, 8-12 min large)
+  - **Live progress updates**: Status message every 10 seconds with elapsed time and token count
+  - **Performance metrics**: Final report shows generation time and tokens/second rate
+- **Optimized prompt size for large tenants** — Reduces LLM processing time
+  - **Adaptive detail levels**: Large tenants (1000+ users) receive condensed data summaries
+  - **Stale user limits**: Top 10 for small, 8 for medium, 5 for large tenants
+  - **Domain limits**: Top 5 for small/medium, 3 for large tenants
+  - **Memory efficiency**: Prevents swap thrashing on systems with limited RAM
 
 ### 2026-02-09 (Update 5)
 - **Added User Account Health insights** — New section analyzing stale accounts, guest hygiene, license waste, and MFA methods

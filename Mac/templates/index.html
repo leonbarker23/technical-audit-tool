@@ -521,6 +521,10 @@ body {
             <input type="checkbox" id="m365SkipMaester" />
             Skip Maester security tests
         </label>
+        <label class="checkbox-label" style="margin-left: 20px;">
+            <input type="checkbox" id="m365UpdateMaesterTests" />
+            Update Maester tests (refresh cached tests)
+        </label>
     </div>
     <p style="color:#7d8590; font-size:0.8rem; margin-top:10px; text-align:center;">
         Requires PowerShell 7 and will prompt for Microsoft 365 authentication (Global Reader recommended)
@@ -1166,6 +1170,7 @@ function startM365Assessment() {
 
     // Get options
     const skipMaester = document.getElementById('m365SkipMaester').checked;
+    const updateMaesterTests = document.getElementById('m365UpdateMaesterTests').checked;
 
     // reset UI
     m365ReportAccum = '';
@@ -1181,7 +1186,8 @@ function startM365Assessment() {
 
     const url = '/m365assessment?client=' + encodeURIComponent(client) +
                 '&session=' + encodeURIComponent(m365SessionId) +
-                '&skipMaester=' + skipMaester;
+                '&skipMaester=' + skipMaester +
+                '&updateMaesterTests=' + updateMaesterTests;
 
     m365Es = new EventSource(url);
 

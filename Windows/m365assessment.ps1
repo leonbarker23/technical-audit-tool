@@ -26,7 +26,9 @@ param(
     [Parameter(Mandatory=$true)]
     [string]$ClientName,
 
-    [switch]$SkipMaester
+    [switch]$SkipMaester,
+
+    [switch]$UpdateMaesterTests
 )
 
 $ErrorActionPreference = "Stop"
@@ -1221,25 +1223,72 @@ try {
         try {
             Import-Module Maester -ErrorAction Stop
 
-            # Create Maester output folder
-            $maesterFolder = Join-Path $clientFolder "MaesterTests"
-            if (-not (Test-Path $maesterFolder)) {
-                New-Item -ItemType Directory -Path $maesterFolder -Force | Out-Null
+            # Use shared Maester tests folder (not per-client)
+            $maesterTestsFolder = Join-Path $OutputPath "MaesterTests"
+            $versionFile = Join-Path $maesterTestsFolder ".maester-version"
+
+            if (-not (Test-Path $maesterTestsFolder)) {
+                New-Item -ItemType Directory -Path $maesterTestsFolder -Force | Out-Null
             }
 
-            # Install Maester tests - clear folder first to avoid "not empty" warning
-            Write-Status "Installing Maester test files..."
-            if (Test-Path $maesterFolder) {
-                # Remove existing test files but keep any reports
-                Get-ChildItem -Path $maesterFolder -Filter "*.ps1" -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
-                Get-ChildItem -Path $maesterFolder -Directory | Where-Object { $_.Name -notin @('test-results') } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-            }
-            Install-MaesterTests -Path $maesterFolder -ErrorAction Stop
+            # Check if tests need to be installed/updated
+            $needsInstall = $false
+            $testAge = $null
 
-            # Run Maester tests - use OutputFolder to generate all formats (HTML, JSON, MD)
+            if (-not (Test-Path $versionFile)) {
+                $needsInstall = $true
+                Write-Status "No cached Maester tests found" "INFO"
+            }
+            elseif ($UpdateMaesterTests) {
+                $needsInstall = $true
+                Write-Status "Forced update of Maester tests requested" "INFO"
+            }
+            else {
+                # Check age of tests
+                $versionInfo = Get-Content $versionFile -Raw | ConvertFrom-Json
+                $lastUpdate = [DateTime]$versionInfo.lastUpdate
+                $testAge = (Get-Date) - $lastUpdate
+
+                if ($testAge.Days -gt 30) {
+                    $needsInstall = $true
+                    Write-Status "Cached Maester tests are $($testAge.Days) days old (>30 days)" "WARNING"
+                }
+                else {
+                    Write-Status "Using cached Maester tests (age: $($testAge.Days) days)" "INFO"
+                }
+            }
+
+            # Install/update tests if needed
+            if ($needsInstall) {
+                Write-Status "Installing Maester test files..."
+
+                # Clear existing test files
+                if (Test-Path $maesterTestsFolder) {
+                    Get-ChildItem -Path $maesterTestsFolder -Filter "*.ps1" -Recurse | Remove-Item -Force -ErrorAction SilentlyContinue
+                    Get-ChildItem -Path $maesterTestsFolder -Directory | Where-Object { $_.Name -notin @('test-results') } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+                }
+
+                Install-MaesterTests -Path $maesterTestsFolder -ErrorAction Stop
+
+                # Create version file
+                $versionInfo = @{
+                    lastUpdate = (Get-Date).ToString("o")
+                    maesterVersion = (Get-Module Maester).Version.ToString()
+                }
+                $versionInfo | ConvertTo-Json | Out-File -FilePath $versionFile -Encoding UTF8
+                Write-Status "Maester tests cached successfully" "SUCCESS"
+            }
+
+            # Create client-specific output folder
+            $maesterOutputFolder = Join-Path $clientFolder "MaesterTests"
+            if (-not (Test-Path $maesterOutputFolder)) {
+                New-Item -ItemType Directory -Path $maesterOutputFolder -Force | Out-Null
+            }
+
+            # Run Maester tests - use cached tests but output to client folder
             # Use -SkipGraphConnect since we already have a valid Graph connection with required scopes
             Write-Status "Executing security tests..."
-            $maesterResults = Invoke-Maester -Path $maesterFolder -OutputFolder $maesterFolder -OutputFolderFileName "MaesterReport" -NonInteractive -PassThru -SkipGraphConnect -ErrorAction Stop
+            $maesterResults = Invoke-Maester -Path $maesterTestsFolder -OutputFolder $maesterOutputFolder -OutputFolderFileName "MaesterReport" -NonInteractive -PassThru -SkipGraphConnect -ErrorAction Stop
 
             # Parse results
             $passed = ($maesterResults | Where-Object { $_.Result -eq 'Passed' }).Count
@@ -1272,26 +1321,26 @@ try {
             $assessmentData | ConvertTo-Json -Depth 15 | Out-File -FilePath $jsonPath -Encoding UTF8
 
             # Find generated files (MaesterReport.html, MaesterReport.json, MaesterReport.md)
-            $htmlReport = Get-ChildItem -Path $maesterFolder -Filter "MaesterReport.html" -ErrorAction SilentlyContinue | Select-Object -First 1
+            $htmlReport = Get-ChildItem -Path $maesterOutputFolder -Filter "MaesterReport.html" -ErrorAction SilentlyContinue | Select-Object -First 1
             if (-not $htmlReport) {
-                $htmlReport = Get-ChildItem -Path $maesterFolder -Filter "*.html" -ErrorAction SilentlyContinue | Select-Object -First 1
+                $htmlReport = Get-ChildItem -Path $maesterOutputFolder -Filter "*.html" -ErrorAction SilentlyContinue | Select-Object -First 1
             }
             if ($htmlReport) {
                 $maesterHtmlFile = "$ClientName/MaesterTests/$($htmlReport.Name)"
             }
 
-            $jsonReport = Get-ChildItem -Path $maesterFolder -Filter "MaesterReport.json" -ErrorAction SilentlyContinue | Select-Object -First 1
+            $jsonReport = Get-ChildItem -Path $maesterOutputFolder -Filter "MaesterReport.json" -ErrorAction SilentlyContinue | Select-Object -First 1
             if (-not $jsonReport) {
-                $jsonReport = Get-ChildItem -Path $maesterFolder -Filter "*.json" -ErrorAction SilentlyContinue | Select-Object -First 1
+                $jsonReport = Get-ChildItem -Path $maesterOutputFolder -Filter "*.json" -ErrorAction SilentlyContinue | Select-Object -First 1
             }
             if ($jsonReport) {
                 $maesterJsonFile = "$ClientName/MaesterTests/$($jsonReport.Name)"
             }
 
             # Find the markdown report for AI analysis
-            $mdReport = Get-ChildItem -Path $maesterFolder -Filter "MaesterReport.md" -ErrorAction SilentlyContinue | Select-Object -First 1
+            $mdReport = Get-ChildItem -Path $maesterOutputFolder -Filter "MaesterReport.md" -ErrorAction SilentlyContinue | Select-Object -First 1
             if (-not $mdReport) {
-                $mdReport = Get-ChildItem -Path $maesterFolder -Filter "*.md" -ErrorAction SilentlyContinue | Select-Object -First 1
+                $mdReport = Get-ChildItem -Path $maesterOutputFolder -Filter "*.md" -ErrorAction SilentlyContinue | Select-Object -First 1
             }
             $maesterMdFile = $null
             if ($mdReport) {
