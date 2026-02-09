@@ -312,6 +312,18 @@ See `Windows/requirements.txt` for Python packages.
 
 ## Changelog
 
+### 2026-02-09 (Update 3)
+- **Restructured M365 assessment report format** — New 7-section structure:
+  1. **Executive Summary** — High-level security posture overview
+  2. **Licensing Overview** — All paid licenses with exact counts and SKU translations
+  3. **Identity & Access Management** — MFA status, CA policies, Global Admin count with risk levels
+  4. **Microsoft Secure Score** — Score percentage + all 10 recommendations with point values
+  5. **Security Test Findings** — Maester themes/patterns grouped by category
+  6. **Project Recommendations** — Immediate (0-30d), Short-term (1-3m), Strategic (3-12m)
+  7. **Discussion Points** — Sales angle, license optimisation, compliance considerations
+  8. **Conclusion** — Top 3 priorities and next steps
+- **Formatted JSON output** — Removed `-Compress` flag so JSON files are human-readable
+
 ### 2026-02-09 (Update 2)
 - **Fixed SharePoint site count** — Now uses `getSharePointSiteUsageDetail` report for accurate tenant-wide site count
   - Previously used `Get-MgSite` which only returned sites accessible to the authenticated user
@@ -319,11 +331,6 @@ See `Windows/requirements.txt` for Python packages.
 - **Fixed license type confusion (A3 vs E3)** — Added explicit SKU-to-name mapping in LLM prompt
   - LLM now instructed to report EXACT SKU names and not confuse Education (A3/A5) with Enterprise (E3/E5)
   - Added common SKU mappings: SPE_A3, M365EDU_A3, SPE_E3, ENTERPRISEPACK, etc.
-- **Simplified LLM report format** — Removed MSP sales language, now focuses on:
-  - Technical estate breakdown
-  - Security assessment with risk levels
-  - Actionable recommendations and projects
-  - Strategic initiatives
 
 ### 2026-02-09
 - **Filtered free licenses from M365 report** — Free/trial licenses no longer clutter the AI analysis
