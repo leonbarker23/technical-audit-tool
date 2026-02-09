@@ -977,6 +977,176 @@ def m365assessment():
                     mimetype="text/event-stream", headers=headers)
 
 
+def _format_user_insights(data: dict) -> str:
+    """Pre-format user insights for LLM - all analysis done here in Python."""
+    insights = data.get("userInsights", {})
+    licensing = data.get("licensing", {})
+    total_users = licensing.get("totalUsers", 1) or 1  # Avoid division by zero
+
+    sections = []
+
+    # ── Stale Accounts ──
+    stale = insights.get("staleAccounts", {})
+    if stale and stale.get("totalAnalysed", 0) > 0:
+        stale_90 = stale.get("stale90Days", 0)
+        stale_180 = stale.get("stale180Days", 0)
+        stale_365 = stale.get("stale365Days", 0)
+        never = stale.get("neverSignedIn", 0)
+        analysed = stale.get("totalAnalysed", 0)
+        stale_pct = round((stale_90 / analysed) * 100, 1) if analysed > 0 else 0
+
+        # Risk assessment
+        if stale_pct > 30:
+            risk = "Critical"
+            recommendation = "Urgent cleanup required - over 30% of accounts are stale"
+        elif stale_pct > 20:
+            risk = "High"
+            recommendation = "Immediate review needed - significant number of stale accounts"
+        elif stale_pct > 10:
+            risk = "Medium"
+            recommendation = "Schedule quarterly access review"
+        else:
+            risk = "Low"
+            recommendation = "Continue regular access reviews"
+
+        stale_section = f"""### Stale Accounts
+- **90+ days inactive:** {stale_90} users ({stale_pct}% of workforce)
+- **180+ days:** {stale_180} | **365+ days:** {stale_365} | **Never signed in:** {never}
+- **Risk Level:** {risk}
+- **Recommendation:** {recommendation}"""
+
+        # Add top stale users with licenses
+        top_stale = stale.get("topStaleWithLicenses", [])
+        if top_stale:
+            stale_section += "\n\n**Top stale accounts with licenses (priority for cleanup):**"
+            for user in top_stale[:10]:
+                stale_section += f"\n- {user.get('displayName', 'Unknown')} - Last sign-in: {user.get('lastSignIn', 'Never')}, Licenses: {user.get('licenseCount', 0)}"
+
+        sections.append(stale_section)
+
+    # ── Guest Analysis ──
+    guest = insights.get("guestAnalysis", {})
+    if guest and guest.get("totalGuests", 0) > 0:
+        total_guests = guest.get("totalGuests", 0)
+        active = guest.get("activeGuests", 0)
+        inactive = guest.get("inactiveGuests", 0)
+        never = guest.get("neverSignedIn", 0)
+        active_pct = round((active / total_guests) * 100, 1) if total_guests > 0 else 0
+        inactive_pct = round(((inactive + never) / total_guests) * 100, 1) if total_guests > 0 else 0
+
+        # Risk assessment
+        if inactive_pct > 70:
+            risk = "High"
+            recommendation = "Implement guest access review - majority of guests are inactive"
+        elif inactive_pct > 50:
+            risk = "Medium"
+            recommendation = "Schedule guest access audit"
+        else:
+            risk = "Low"
+            recommendation = "Continue periodic guest reviews"
+
+        guest_section = f"""### Guest Account Hygiene
+- **Total guests:** {total_guests}
+- **Active (90 days):** {active} ({active_pct}%) | **Inactive:** {inactive} | **Never signed in:** {never}
+- **Risk Level:** {risk}
+- **Recommendation:** {recommendation}"""
+
+        # Add top domains
+        top_domains = guest.get("topDomains", [])
+        if top_domains:
+            guest_section += "\n\n**Top external domains:**"
+            for domain in top_domains[:5]:
+                guest_section += f"\n- {domain.get('domain', 'Unknown')}: {domain.get('count', 0)} guests"
+
+        sections.append(guest_section)
+
+    # ── License Waste ──
+    waste = insights.get("licenseWaste", {})
+    if waste and waste.get("inactiveUsers", 0) > 0:
+        inactive_users = waste.get("inactiveUsers", 0)
+        licenses = waste.get("licensesAffected", 0)
+        monthly = waste.get("estimatedMonthlyGBP", 0)
+        annual = round(monthly * 12, 2)
+
+        # Priority assessment
+        if monthly > 1000:
+            priority = "Critical"
+            recommendation = f"Immediate action - potential annual savings of GBP {annual:,.2f}"
+        elif monthly > 500:
+            priority = "High"
+            recommendation = f"Review and reclaim - potential annual savings of GBP {annual:,.2f}"
+        elif monthly > 100:
+            priority = "Medium"
+            recommendation = "Include in quarterly license review"
+        else:
+            priority = "Low"
+            recommendation = "Monitor in regular reviews"
+
+        waste_section = f"""### License Waste
+- **Inactive licensed users:** {inactive_users} (90+ days no sign-in)
+- **Licenses affected:** {licenses}
+- **Estimated monthly waste:** GBP {monthly:,.2f}
+- **Potential annual savings:** GBP {annual:,.2f}
+- **Priority:** {priority}
+- **Recommendation:** {recommendation}"""
+
+        # Add breakdown by license
+        by_license = waste.get("byLicense", [])
+        if by_license:
+            waste_section += "\n\n**Waste by license type:**"
+            for lic in by_license[:8]:
+                waste_section += f"\n- {lic.get('skuName', 'Unknown')}: {lic.get('count', 0)} inactive (GBP {lic.get('monthlyCost', 0):,.2f}/month)"
+
+        sections.append(waste_section)
+
+    # ── Enhanced MFA ──
+    mfa = insights.get("mfaDetails", {})
+    if mfa and mfa.get("registered", 0) > 0:
+        capable = mfa.get("capable", 0)
+        registered = mfa.get("registered", 0)
+        sms_only = mfa.get("smsOnly", 0)
+        passwordless = mfa.get("passwordless", 0)
+
+        # Risk assessment for SMS-only
+        if sms_only > 0:
+            sms_pct = round((sms_only / registered) * 100, 1) if registered > 0 else 0
+            if sms_pct > 30:
+                mfa_risk = "High"
+                mfa_rec = "Migrate users from SMS to authenticator app - SMS is vulnerable to SIM swapping"
+            elif sms_pct > 10:
+                mfa_risk = "Medium"
+                mfa_rec = "Plan phased migration from SMS to stronger MFA methods"
+            else:
+                mfa_risk = "Low"
+                mfa_rec = "Continue promoting authenticator app adoption"
+        else:
+            mfa_risk = "Low"
+            mfa_rec = "Good MFA hygiene - no SMS-only users detected"
+            sms_pct = 0
+
+        mfa_section = f"""### MFA Method Analysis
+- **MFA Capable:** {capable} users
+- **MFA Registered:** {registered} users
+- **SMS-only MFA (weak):** {sms_only} users ({sms_pct}%)
+- **Passwordless capable:** {passwordless} users
+- **Risk Level:** {mfa_risk}
+- **Recommendation:** {mfa_rec}"""
+
+        # Add method breakdown
+        methods = mfa.get("methods", [])
+        if methods:
+            mfa_section += "\n\n**Authentication methods registered:**"
+            for method in methods[:6]:
+                mfa_section += f"\n- {method.get('method', 'Unknown')}: {method.get('count', 0)} users ({method.get('percentage', 0)}%)"
+
+        sections.append(mfa_section)
+
+    if sections:
+        return "## User Account Health\n\n" + "\n\n".join(sections)
+    else:
+        return "## User Account Health\n\nNo user insights data available."
+
+
 def _m365assessment_prompt(data: dict, maester_md_content: str = None) -> str:
     """Build the LLM prompt for M365 Assessment analysis."""
     metadata = data.get("metadata", {})
@@ -1022,6 +1192,9 @@ def _m365assessment_prompt(data: dict, maester_md_content: str = None) -> str:
         f"- {r.get('roleName', 'Unknown')}: {r.get('memberCount', 0)} members"
         for r in sorted(admin_roles, key=lambda x: -x.get('memberCount', 0))[:10]
     ])
+
+    # Build pre-formatted user insights (all analysis done in Python)
+    user_insights_section = _format_user_insights(data)
 
     # Build Maester summary
     maester_summary = ""
@@ -1158,6 +1331,8 @@ This is the ACTUAL Maester security test output - use this to identify security 
 {maester_md_content[:20000] if maester_md_content and len(maester_md_content) > 20000 else maester_md_content if maester_md_content else "Maester report not available."}
 ''' if maester_md_content else ''}
 
+{user_insights_section}
+
 === END RAW DATA ===
 
 ---
@@ -1228,10 +1403,17 @@ Summarise the key themes and patterns from the Maester security tests:
 - Do NOT list every individual test - focus on patterns and themes
 - **Overall Security Risk**: Critical/High/Medium/Low
 
-## 5. Project Recommendations
+## 5. User Account Health
+
+Include the User Account Health section EXACTLY as provided in the raw data above.
+This section is pre-analysed - copy it directly without modification.
+It includes: Stale Accounts, Guest Account Hygiene, License Waste, and MFA Method Analysis.
+
+## 6. Project Recommendations
 
 ### Immediate Actions (0-30 days)
 5-7 quick wins that can be implemented immediately to address critical gaps.
+Include license recovery and stale account cleanup if relevant.
 
 ### Short-term Projects (1-3 months)
 3-5 projects requiring planning, testing, or change management.
@@ -1239,16 +1421,16 @@ Summarise the key themes and patterns from the Maester security tests:
 ### Strategic Roadmap (3-12 months)
 2-3 larger initiatives for long-term security maturity improvement.
 
-## 6. Discussion Points
+## 7. Discussion Points
 
 Key topics for client conversation:
 - Security gaps that pose business risk
-- License optimisation opportunities (upgrades that unlock features, or cost savings)
+- License optimisation opportunities (upgrades that unlock features, or cost savings from license waste)
 - Compliance considerations
 - Value of ongoing security management and monitoring
 - Quick wins vs. larger transformation projects
 
-## 7. Conclusion
+## 8. Conclusion
 
 Brief summary of:
 - Current state assessment

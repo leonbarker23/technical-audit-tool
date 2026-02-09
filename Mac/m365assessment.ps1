@@ -285,6 +285,36 @@ try {
             summary = @{}
             testResults = @()
         }
+        userInsights = @{
+            staleAccounts = @{
+                stale90Days = 0
+                stale180Days = 0
+                stale365Days = 0
+                neverSignedIn = 0
+                totalAnalysed = 0
+                topStaleWithLicenses = @()
+            }
+            guestAnalysis = @{
+                totalGuests = 0
+                activeGuests = 0
+                inactiveGuests = 0
+                neverSignedIn = 0
+                topDomains = @()
+            }
+            licenseWaste = @{
+                inactiveUsers = 0
+                licensesAffected = 0
+                estimatedMonthlyGBP = 0.0
+                byLicense = @()
+            }
+            mfaDetails = @{
+                capable = 0
+                registered = 0
+                smsOnly = 0
+                passwordless = 0
+                methods = @()
+            }
+        }
     }
 
     # ── Get Organization Info ────────────────────────────────────────────────
@@ -597,13 +627,53 @@ try {
 
         if ($allMfaUsers.Count -gt 0) {
             $mfaRegistered = ($allMfaUsers | Where-Object { $_.isMfaRegistered -eq $true }).Count
+            $mfaCapable = ($allMfaUsers | Where-Object { $_.isMfaCapable -eq $true }).Count
+            $passwordless = ($allMfaUsers | Where-Object { $_.isPasswordlessCapable -eq $true }).Count
+
+            # Count users with only SMS/phone as MFA method (weak MFA)
+            $smsOnly = ($allMfaUsers | Where-Object {
+                $_.methodsRegistered -and
+                $_.methodsRegistered.Count -eq 1 -and
+                ($_.methodsRegistered -contains "mobilePhone" -or $_.methodsRegistered -contains "alternateMobilePhone")
+            }).Count
+
+            # Count authentication methods
+            $methodCounts = @{}
+            foreach ($user in $allMfaUsers) {
+                if ($user.methodsRegistered) {
+                    foreach ($method in $user.methodsRegistered) {
+                        if (-not $methodCounts.ContainsKey($method)) {
+                            $methodCounts[$method] = 0
+                        }
+                        $methodCounts[$method]++
+                    }
+                }
+            }
+
             $total = $allMfaUsers.Count
+            $methodBreakdown = $methodCounts.GetEnumerator() | Sort-Object Value -Descending | ForEach-Object {
+                @{
+                    method = $_.Key
+                    count = $_.Value
+                    percentage = [math]::Round(($_.Value / $total) * 100, 1)
+                }
+            }
+
             $assessmentData.identity.mfaStatus = @{
                 registered = $mfaRegistered
                 total = $total
                 percentage = if ($total -gt 0) { [math]::Round(($mfaRegistered / $total) * 100, 1) } else { 0 }
             }
-            Write-Status "  MFA registration: $mfaRegistered/$total users" "SUCCESS"
+
+            $assessmentData.userInsights.mfaDetails = @{
+                capable = $mfaCapable
+                registered = $mfaRegistered
+                smsOnly = $smsOnly
+                passwordless = $passwordless
+                methods = @($methodBreakdown)
+            }
+
+            Write-Status "  MFA: $mfaRegistered/$total registered, $mfaCapable capable, $smsOnly SMS-only (weak)" "SUCCESS"
         }
     }
     catch {
@@ -685,6 +755,252 @@ try {
     }
     catch {
         Write-Status "  Could not retrieve named locations: $_" "WARNING"
+    }
+
+    # ── User Insights (Stale Accounts, Guest Analysis, License Waste) ────────
+
+    Write-Status "Analysing user account health..."
+
+    # Stale Accounts Detection (also collects data for license waste)
+    try {
+        $allMemberUsers = @()
+        $usersUri = "https://graph.microsoft.com/beta/users?`$select=id,displayName,userPrincipalName,signInActivity,assignedLicenses&`$filter=userType eq 'Member'&`$top=999"
+
+        do {
+            $usersResponse = Invoke-MgGraphRequest -Method GET -Uri $usersUri -Headers @{"ConsistencyLevel"="eventual"} -OutputType PSObject
+            if ($usersResponse.value) {
+                $allMemberUsers += $usersResponse.value
+            }
+            $usersUri = $usersResponse.'@odata.nextLink'
+        } while ($usersUri)
+
+        $now = Get-Date
+        $threshold90 = $now.AddDays(-90)
+        $threshold180 = $now.AddDays(-180)
+        $threshold365 = $now.AddDays(-365)
+
+        $stale90 = 0
+        $stale180 = 0
+        $stale365 = 0
+        $neverSignedIn = 0
+        $staleWithLicenses = @()
+
+        foreach ($user in $allMemberUsers) {
+            $lastSignIn = $null
+            if ($user.signInActivity.lastSignInDateTime) {
+                $lastSignIn = [DateTime]$user.signInActivity.lastSignInDateTime
+            }
+
+            $hasLicense = ($user.assignedLicenses -and $user.assignedLicenses.Count -gt 0)
+
+            if (-not $lastSignIn) {
+                $neverSignedIn++
+                if ($hasLicense) {
+                    $staleWithLicenses += @{
+                        displayName = $user.displayName
+                        userPrincipalName = $user.userPrincipalName
+                        lastSignIn = "Never"
+                        licenseCount = $user.assignedLicenses.Count
+                    }
+                }
+            }
+            else {
+                if ($lastSignIn -lt $threshold365) {
+                    $stale365++
+                    $stale180++
+                    $stale90++
+                }
+                elseif ($lastSignIn -lt $threshold180) {
+                    $stale180++
+                    $stale90++
+                }
+                elseif ($lastSignIn -lt $threshold90) {
+                    $stale90++
+                }
+
+                if ($hasLicense -and $lastSignIn -lt $threshold90) {
+                    $staleWithLicenses += @{
+                        displayName = $user.displayName
+                        userPrincipalName = $user.userPrincipalName
+                        lastSignIn = $lastSignIn.ToString("yyyy-MM-dd")
+                        licenseCount = $user.assignedLicenses.Count
+                    }
+                }
+            }
+        }
+
+        # Sort by most stale (never signed in first, then by date)
+        $topStale = $staleWithLicenses | Sort-Object { if ($_.lastSignIn -eq "Never") { "0000-00-00" } else { $_.lastSignIn } } | Select-Object -First 20
+
+        $assessmentData.userInsights.staleAccounts = @{
+            stale90Days = $stale90
+            stale180Days = $stale180
+            stale365Days = $stale365
+            neverSignedIn = $neverSignedIn
+            totalAnalysed = $allMemberUsers.Count
+            topStaleWithLicenses = @($topStale)
+        }
+
+        Write-Status "  Stale accounts: $stale90 (90d), $stale180 (180d), $stale365 (1yr), $neverSignedIn never" "SUCCESS"
+    }
+    catch {
+        Write-Status "  Could not analyse stale accounts: $_" "WARNING"
+        $assessmentData.metadata.dataGaps += "Stale Accounts"
+    }
+
+    # Guest User Analysis
+    try {
+        $allGuests = @()
+        $guestsUri = "https://graph.microsoft.com/beta/users?`$select=id,displayName,userPrincipalName,mail,signInActivity&`$filter=userType eq 'Guest'&`$top=999"
+
+        do {
+            $guestsResponse = Invoke-MgGraphRequest -Method GET -Uri $guestsUri -Headers @{"ConsistencyLevel"="eventual"} -OutputType PSObject
+            if ($guestsResponse.value) {
+                $allGuests += $guestsResponse.value
+            }
+            $guestsUri = $guestsResponse.'@odata.nextLink'
+        } while ($guestsUri)
+
+        $activeGuests = 0
+        $inactiveGuests = 0
+        $guestNeverSignedIn = 0
+        $domainCounts = @{}
+
+        foreach ($guest in $allGuests) {
+            # Extract external domain
+            $domain = $null
+            if ($guest.userPrincipalName -match '(.+)#EXT#@') {
+                $externalPart = $matches[1]
+                if ($externalPart -match '_([^_]+)$') {
+                    $domain = $matches[1]
+                }
+            }
+            elseif ($guest.mail) {
+                $domain = ($guest.mail -split '@')[-1]
+            }
+
+            if ($domain) {
+                if (-not $domainCounts.ContainsKey($domain)) {
+                    $domainCounts[$domain] = 0
+                }
+                $domainCounts[$domain]++
+            }
+
+            $lastSignIn = $null
+            if ($guest.signInActivity.lastSignInDateTime) {
+                $lastSignIn = [DateTime]$guest.signInActivity.lastSignInDateTime
+            }
+
+            if (-not $lastSignIn) {
+                $guestNeverSignedIn++
+            }
+            elseif ($lastSignIn -lt $threshold90) {
+                $inactiveGuests++
+            }
+            else {
+                $activeGuests++
+            }
+        }
+
+        # Top 10 domains
+        $topDomains = $domainCounts.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 10 | ForEach-Object {
+            @{ domain = $_.Key; count = $_.Value }
+        }
+
+        $assessmentData.userInsights.guestAnalysis = @{
+            totalGuests = $allGuests.Count
+            activeGuests = $activeGuests
+            inactiveGuests = $inactiveGuests
+            neverSignedIn = $guestNeverSignedIn
+            topDomains = @($topDomains)
+        }
+
+        Write-Status "  Guests: $($allGuests.Count) total, $activeGuests active, $inactiveGuests inactive, $guestNeverSignedIn never" "SUCCESS"
+    }
+    catch {
+        Write-Status "  Could not analyse guest accounts: $_" "WARNING"
+        $assessmentData.metadata.dataGaps += "Guest Analysis"
+    }
+
+    # License Waste Detection (uses stale accounts data)
+    try {
+        # Build SKU lookup
+        $skuLookup = @{}
+        foreach ($sku in $assessmentData.licensing.subscribedSkus) {
+            $skuLookup[$sku.skuId] = $sku.skuPartNumber
+        }
+
+        # Approximate monthly costs (GBP)
+        $skuCosts = @{
+            "SPE_E3" = 30.00; "SPE_E5" = 50.00; "ENTERPRISEPACK" = 18.00; "ENTERPRISEPREMIUM" = 32.00
+            "SPE_A3" = 0.00; "M365EDU_A3" = 0.00; "SPE_A5" = 0.00; "M365EDU_A5" = 0.00
+            "AAD_PREMIUM_P1" = 5.00; "AAD_PREMIUM_P2" = 8.00
+            "EMS_E3" = 8.00; "EMS_E5" = 14.00; "INTUNE_A" = 6.00
+            "POWER_BI_PRO" = 8.00; "PROJECTPREMIUM" = 45.00; "VISIOCLIENT" = 12.00
+        }
+
+        $inactiveUsers = 0
+        $licensesAffected = 0
+        $monthlyWaste = 0.0
+        $licenseBreakdown = @{}
+
+        foreach ($user in $allMemberUsers) {
+            if (-not $user.assignedLicenses -or $user.assignedLicenses.Count -eq 0) {
+                continue
+            }
+
+            $lastSignIn = $null
+            if ($user.signInActivity.lastSignInDateTime) {
+                $lastSignIn = [DateTime]$user.signInActivity.lastSignInDateTime
+            }
+
+            $isInactive = (-not $lastSignIn) -or ($lastSignIn -lt $threshold90)
+
+            if ($isInactive) {
+                $inactiveUsers++
+
+                foreach ($license in $user.assignedLicenses) {
+                    $licensesAffected++
+                    $skuName = $skuLookup[$license.skuId]
+                    if (-not $skuName) { $skuName = "Unknown" }
+
+                    if (-not $licenseBreakdown.ContainsKey($skuName)) {
+                        $licenseBreakdown[$skuName] = 0
+                    }
+                    $licenseBreakdown[$skuName]++
+
+                    if ($skuCosts.ContainsKey($skuName)) {
+                        $monthlyWaste += $skuCosts[$skuName]
+                    }
+                    else {
+                        $monthlyWaste += 15.00  # Default estimate
+                    }
+                }
+            }
+        }
+
+        # Format breakdown
+        $byLicense = $licenseBreakdown.GetEnumerator() | Sort-Object Value -Descending | ForEach-Object {
+            $cost = if ($skuCosts.ContainsKey($_.Key)) { $skuCosts[$_.Key] } else { 15.00 }
+            @{
+                skuName = $_.Key
+                count = $_.Value
+                monthlyCost = [math]::Round($_.Value * $cost, 2)
+            }
+        }
+
+        $assessmentData.userInsights.licenseWaste = @{
+            inactiveUsers = $inactiveUsers
+            licensesAffected = $licensesAffected
+            estimatedMonthlyGBP = [math]::Round($monthlyWaste, 2)
+            byLicense = @($byLicense)
+        }
+
+        Write-Status "  License waste: $inactiveUsers users, $licensesAffected licenses, ~GBP $([math]::Round($monthlyWaste, 2))/month" "WARNING"
+    }
+    catch {
+        Write-Status "  Could not analyse license waste: $_" "WARNING"
+        $assessmentData.metadata.dataGaps += "License Waste"
     }
 
     # ── Intune Data ──────────────────────────────────────────────────────────
