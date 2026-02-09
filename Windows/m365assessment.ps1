@@ -372,15 +372,15 @@ try {
     try {
         # Total users
         $userCount = (Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/users/`$count" -Headers @{"ConsistencyLevel"="eventual"})
-        $assessmentData.licensing.totalUsers = $userCount
+        $assessmentData.licensing.totalUsers = [int]$userCount
 
         # Guest users
         $guestCount = (Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/users/`$count?`$filter=userType eq 'Guest'" -Headers @{"ConsistencyLevel"="eventual"})
-        $assessmentData.licensing.guestUsers = $guestCount
+        $assessmentData.licensing.guestUsers = [int]$guestCount
 
         # Licensed users (members only)
         $licensedCount = (Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/users/`$count?`$filter=assignedLicenses/`$count ne 0 and userType eq 'Member'" -Headers @{"ConsistencyLevel"="eventual"})
-        $assessmentData.licensing.licensedUsers = $licensedCount
+        $assessmentData.licensing.licensedUsers = [int]$licensedCount
 
         Write-Status "  Total users: $userCount (Licensed: $licensedCount, Guests: $guestCount)" "SUCCESS"
     }

@@ -914,7 +914,7 @@ def m365assessment():
             import time
 
             # Calculate tenant size for logging
-            total_users = assessment_data.get("licensing", {}).get("totalUsers", 0)
+            total_users = int(assessment_data.get("licensing", {}).get("totalUsers", 0) or 0)
             tenant_size = "small" if total_users < 100 else "medium" if total_users < 1000 else "large"
 
             yield sse(f"[*] Tenant size: {total_users} users ({tenant_size})", event="status")
@@ -995,7 +995,7 @@ def _format_user_insights(data: dict) -> str:
     """Pre-format user insights for LLM - all analysis done here in Python."""
     insights = data.get("userInsights", {})
     licensing = data.get("licensing", {})
-    total_users = licensing.get("totalUsers", 1) or 1  # Avoid division by zero
+    total_users = int(licensing.get("totalUsers", 1) or 1)  # Convert to int and avoid division by zero
 
     # Adjust detail level based on tenant size (reduce prompt size for large tenants)
     if total_users < 100:
