@@ -919,26 +919,30 @@ def m365assessment():
 
             yield sse(f"[*] Tenant size: {total_users} users ({tenant_size})", event="status")
 
-            # ALWAYS generate Python-templated structured report (instant)
+            # ALWAYS generate Python-templated structured report (instant, HTML)
             yield sse(f"[*] Generating structured report...", event="status")
 
             try:
                 from report_templates import M365TemplatedReport
                 template_report = M365TemplatedReport(assessment_data)
-                structured_report = template_report.generate()
 
-                # Save structured report
+                # Generate standalone HTML for file (with full document structure)
+                structured_report_file = template_report.generate(standalone=True)
+                # Generate embedded HTML for web UI (just body content)
+                structured_report_ui = template_report.generate(standalone=False)
+
+                # Save structured report as HTML
                 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-                structured_file = f"m365assessment_structured_{timestamp}.md"
+                structured_file = f"m365assessment_structured_{timestamp}.html"
                 structured_path = os.path.join(client_folder, structured_file)
                 with open(structured_path, "w") as f:
-                    f.write(structured_report)
+                    f.write(structured_report_file)
 
                 yield sse(f"[✓] Structured report generated: {structured_file}", event="status")
                 yield sse("")
 
-                # Send complete structured report to UI for proper markdown rendering
-                yield sse(structured_report, event="report_chunk")
+                # Send embedded HTML to UI (no markdown parsing needed)
+                yield sse(structured_report_ui, event="report_html")
 
             except Exception as exc:
                 yield sse(f"[!] Error generating structured report: {exc}", event="m365_error")

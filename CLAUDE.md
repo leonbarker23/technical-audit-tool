@@ -343,49 +343,34 @@ See `Windows/requirements.txt` for Python packages.
 
 ## Changelog
 
-### 2026-02-10 (IN PROGRESS - Hybrid Reporting)
-- **🚧 INCOMPLETE: Hybrid reporting implementation** — Python templates + optional LLM (feature branch: `feature/hybrid-reporting`)
-  - ✅ **M365 Assessment COMPLETE** (macOS only):
-    - New `report_templates.py` module with `M365TemplatedReport` class (901 lines)
-    - Pure Python report generation (<1 second, no Ollama required)
-    - All risk assessment logic in Python with clear thresholds:
-      - MFA risk: <50% + no enforcement = Critical | <80% = High | partial CA = Medium
-      - Secure Score: <40% Critical | <60% High | <80% Medium | ≥80% Low
-      - Global Admins: >5 or >5% of users = High | >3 = Medium | 0 = High (need redundancy)
-      - Stale accounts: >30% = Critical | >20% = High | >10% = Medium
-      - License waste: >£1000/month = Critical | >£500 = High | >£100 = Medium
-    - 8-section structured markdown report with tables, risk colors, and recommendations
-    - Optional LLM checkbox for AI-enhanced summary (unchecked by default)
-    - Saves both `_structured_` (always) and `_report_` (if LLM enabled) files
-    - **Fixed:** Report now renders with full formatting in UI (tables, bold, colors)
-    - **Tested:** Successfully generated reports from real tenant data
+### 2026-02-10 (M365 HTML Report Generation)
+- **✅ M365 Assessment HTML Reports** — Converted from Markdown to styled HTML output
+  - **HTML Output**: Reports now generate as styled HTML instead of Markdown
+    - Standalone HTML files with full document structure and dark theme styling
+    - Embedded HTML for web UI (no markdown parsing needed)
+    - Print-friendly CSS media query for readable printouts
+  - **Improved Risk Assessment Logic**:
+    - Global Admins: 0 = High (need redundancy) | 1 = Medium (need break-glass) | 2-3 = Low | 4-5 = Medium | >5 = High
+    - Added break-glass account recommendation for single admin tenants
+  - **Enhanced License SKU Reference**:
+    - Added SPB (Microsoft 365 Business Premium)
+    - Added O365_BUSINESS_ESSENTIALS (Business Basic)
+    - Added O365_BUSINESS_PREMIUM (Business Standard)
+  - **UI Improvements**:
+    - New `report_html` SSE event for direct HTML rendering
+    - `report_chunk` event now appends AI summary to existing HTML report
+    - Updated download bar with correct file references
+  - **Files Generated**:
+    - `m365assessment_structured_YYYY-MM-DD_HH-MM.html` — Styled HTML report (always)
+    - `m365assessment_report_YYYY-MM-DD_HH-MM.md` — AI summary (if LLM enabled)
+  - **Code Changes**:
+    - `report_templates.py`: Added `standalone` parameter to `generate()` method
+    - `app.py`: Generates standalone HTML for file, embedded HTML for UI
+    - `index.html`: Added `report_html` event handler, updated file downloads
   - ❌ **TODO: Network Discovery** — Need to create `NetworkTemplatedReport` class
   - ❌ **TODO: Azure Inventory** — Need to create `AzureTemplatedReport` class
   - ❌ **TODO: Zero Trust** — Need to create `ZeroTrustTemplatedReport` class
   - ❌ **TODO: Windows mirror** — All changes need to be mirrored to `Windows/` folder
-  - 📝 **Implementation guide:** See `/Users/leonbarker/.claude/plans/NEXT_STEPS.md`
-
-**COMMITS (feature/hybrid-reporting branch):**
-- `55be8b1` Send structured report as single chunk for proper UI rendering
-- `d802b14` Fix markdown rendering in M365 structured reports
-- `45724df` Update CLAUDE.md with hybrid reporting progress
-- `6e6638d` Implement hybrid reporting for M365 assessment
-- `c69e998` Fix type error in M365 assessment user count comparisons (merged from main)
-
-**NEXT STEPS FOR CONTINUATION:**
-1. Read detailed plan: `cat /Users/leonbarker/.claude/plans/NEXT_STEPS.md`
-2. Implement `NetworkTemplatedReport` class in `Mac/report_templates.py`
-   - Risk scoring for exposed services (telnet/ftp/rpcbind/nfs = Critical, ssh/rdp = High)
-   - Sections: Executive Summary, Network Inventory, Critical Findings, Recommendations
-3. Modify Network Discovery route in `Mac/app.py` (lines 61-245)
-   - Add `use_llm` parameter, generate template report, optional LLM
-4. Add UI checkbox to Network tab in `Mac/templates/index.html`
-5. Repeat pattern for Azure Inventory and Zero Trust
-6. Mirror all changes from `Mac/` to `Windows/` (identical files)
-7. Test each assessment end-to-end
-8. Merge to main and update this changelog with completion status
-
-**ESTIMATED REMAINING TIME:** 4-7 hours (1-2h per assessment + 30min Windows + 30min testing)
 
 ### 2026-02-09 (Update 6)
 - **Added Maester test caching** — Significantly faster M365 assessments through intelligent test file caching

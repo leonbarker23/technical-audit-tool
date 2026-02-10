@@ -1205,7 +1205,15 @@ function startM365Assessment() {
         m365AppendLog('[*] ' + e.data, 'warn');
     });
 
-    // streamed LLM report
+    // HTML report (structured report - no markdown parsing needed)
+    m365Es.addEventListener('report_html', e => {
+        m365Dot('m365ReportDot', 'active');
+        const rp = document.getElementById('m365ReportPanel');
+        rp.innerHTML = e.data;
+        rp.scrollTop = 0;  // Scroll to top for structured report
+    });
+
+    // streamed LLM report (markdown - append to existing HTML report)
     m365Es.addEventListener('report_chunk', e => {
         m365ReportAccum += e.data;
         m365Dot('m365ReportDot', 'active');
@@ -1218,7 +1226,14 @@ function startM365Assessment() {
         html = html.replace(/<strong>(Low[^<]*)<\/strong>/gi, '<span class="sev-low">$1</span>');
 
         const rp = document.getElementById('m365ReportPanel');
-        rp.innerHTML = html;
+        // Create or update AI summary section
+        let aiDiv = rp.querySelector('.ai-summary');
+        if (!aiDiv) {
+            aiDiv = document.createElement('div');
+            aiDiv.className = 'ai-summary';
+            rp.appendChild(aiDiv);
+        }
+        aiDiv.innerHTML = html;
         rp.scrollTop = rp.scrollHeight;
     });
 
@@ -1227,7 +1242,12 @@ function startM365Assessment() {
         const f = JSON.parse(e.data);
         const bar = document.getElementById('m365DlBar');
         let btns = `<a href="/download/${f.json}" class="dl-btn" download>JSON</a>`;
-        btns += `<a href="/download/${f.md}" class="dl-btn" download>Markdown</a>`;
+        if (f.structured_report) {
+            btns += `<a href="/download/${f.structured_report}" class="dl-btn zt-html" target="_blank">Report HTML</a>`;
+        }
+        if (f.llm_report) {
+            btns += `<a href="/download/${f.llm_report}" class="dl-btn" download>AI Summary</a>`;
+        }
         if (f.maesterHtml) {
             btns += `<a href="/download/${f.maesterHtml}" class="dl-btn zt-html" target="_blank">Maester HTML</a>`;
         }
