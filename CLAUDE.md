@@ -10,10 +10,16 @@ A comprehensive assessment suite for MSP technical consultants performing IT aud
 
 | Tab | Status | Description |
 |-----|--------|-------------|
-| **Network Discovery** | Implemented | Network vulnerability scanning with nmap, live log output, AI-generated reports |
-| **M365 Assessment** | Implemented | Microsoft 365 tenant assessment with Maester security tests and Graph API data |
-| **Azure Inventory (ARI)** | Implemented | Azure Resource Inventory with Excel reports, network diagrams, AI analysis |
-| **Zero Trust Assessment** | Implemented | Microsoft 365 Zero Trust security assessment with ~168 tests |
+| **Network Discovery** | ✅ Complete | Network vulnerability scanning with nmap, instant HTML reports, optional AI analysis |
+| **M365 Assessment** | ✅ Complete | Microsoft 365 tenant assessment with Maester tests, instant HTML reports, optional AI summary |
+| **Azure Inventory (ARI)** | ✅ Complete | Azure Resource Inventory with Excel reports, instant HTML summary, optional AI analysis |
+| **Zero Trust Assessment** | ✅ Complete | Microsoft 365 Zero Trust assessment with instant HTML summary, optional AI analysis |
+
+### Hybrid Reporting (All Tabs)
+All assessment tabs now use a **hybrid reporting approach**:
+- **Instant HTML Report** — Python-templated, generates in <1 second, no LLM required
+- **Optional AI Analysis** — Checkbox to enable LLM-enhanced narrative (adds 2-10 min depending on data size)
+- **Consistent Output** — Deterministic reports with risk scoring, tables, and recommendations
 
 ---
 
@@ -59,8 +65,9 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
 1. User enters client name, target (IP/CIDR/hostname), and scan depth
 2. nmap runs as subprocess, output streamed via SSE
 3. XML parsed into structured data
-4. AI (Ollama) generates security assessment report
-5. Files saved to client folder
+4. Python generates instant HTML report (`NetworkTemplatedReport`)
+5. Optional: AI (Ollama) generates enhanced analysis
+6. Files saved to client folder
 
 ### Scan Depth Profiles
 
@@ -70,9 +77,17 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
 | **Medium** | `-sV -O -T4 --min-rate 500` | Version/OS detection, no scripts |
 | **Fast** | `-T5 --top-ports 100 --min-rate 1000` | Top 100 ports only |
 
+### Report Sections (HTML)
+1. **Executive Summary** — Host counts, risk assessment, key findings
+2. **Network Inventory** — Categorised hosts (Infrastructure, Servers, Printers, IoT, etc.)
+3. **Security Findings** — High-risk ports with remediation guidance
+4. **Recommendations** — Prioritised action items
+5. **Technical Appendix** — Full port table with numeric IP sorting
+
 ### Files Generated
 - `<client>_<target>_<timestamp>.json` — Raw scan data
-- `<client>_<target>_<timestamp>.md` — AI-generated report
+- `<client>_<target>_<timestamp>_report.html` — Styled HTML report (always)
+- `<client>_<target>_<timestamp>_ai_report.md` — AI analysis (if enabled)
 
 ---
 
@@ -159,7 +174,7 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
 
 ### Files Generated
 - `m365assessment_YYYY-MM-DD_HH-MM.json` — Raw Graph API assessment data
-- `m365assessment_structured_YYYY-MM-DD_HH-MM.md` — Python-templated structured report (always)
+- `m365assessment_structured_YYYY-MM-DD_HH-MM.html` — Python-templated HTML report (always)
 - `m365assessment_report_YYYY-MM-DD_HH-MM.md` — AI-generated summary (if LLM enabled)
 - `MaesterTests/MaesterReport.html` — Interactive Maester security test report
 - `MaesterTests/MaesterReport.json` — Raw Maester test results
@@ -186,12 +201,24 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
    - Generates Excel workbook with multiple worksheets
    - Optionally generates network topology diagram (Draw.io XML)
 5. PowerShell extracts summary data from Excel to JSON
-6. AI (Ollama) analyses JSON and generates infrastructure report
-7. Report streams to UI in real-time
+6. Python generates instant HTML report (`AzureTemplatedReport`)
+7. Optional: AI (Ollama) generates enhanced analysis
 
 ### Options
 - **Include Security Center** — Adds Azure Defender recommendations
 - **Skip Diagram** — Skips network topology generation (faster)
+- **Generate AI-enhanced analysis** — Adds LLM narrative (unchecked by default)
+
+### Report Sections (HTML)
+1. **Summary Cards** — Total Resources, Subscriptions, VMs, Storage, Databases, Network
+2. **Executive Summary** — Environment size, regions, key observations
+3. **Subscription Overview** — Subscription names and states
+4. **Compute Resources** — VMs by size/state, App Services, Functions, AKS
+5. **Networking** — VNets, NSGs, Load Balancers, Public IPs
+6. **Storage & Databases** — Storage accounts, SQL, Cosmos DB
+7. **Security Posture** — Key Vaults, Defender recommendations
+8. **Cost Optimisation** — Stopped VMs, Reserved Instance candidates
+9. **Recommendations** — Immediate / Short-term / Strategic roadmap
 
 ### Duration
 - Small environments (<100 resources): 5-8 minutes
@@ -199,8 +226,9 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
 - Large environments (500+ resources): 15-20+ minutes
 
 ### Files Generated
-- `azureinventory_YYYY-MM-DD_HH-MM.json` — Summary data for AI
-- `azureinventory_report_YYYY-MM-DD_HH-MM.md` — AI-generated report
+- `azureinventory_YYYY-MM-DD_HH-MM.json` — Summary data
+- `azureinventory_report_YYYY-MM-DD_HH-MM.html` — Styled HTML report (always)
+- `azureinventory_ai_report_YYYY-MM-DD_HH-MM.md` — AI analysis (if enabled)
 - `AzureResourceInventory_Report_*.xlsx` — Full Excel inventory
 - `AzureResourceInventory_Diagram_*.xml` — Network topology (Draw.io)
 
@@ -238,8 +266,24 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
    - Devices pillar (compliance, MDM, data protection)
    - Generates interactive HTML report with charts
    - Exports detailed JSON with all test results
-6. AI (Ollama) analyses test results and generates structured report
-7. Report streams to UI in real-time
+6. Python generates instant HTML summary (`ZeroTrustTemplatedReport`)
+7. Optional: AI (Ollama) generates enhanced analysis
+
+### Report Sections (HTML Summary)
+1. **Summary Cards** — Maturity Level, Tests passed/failed, CA Policies, Global Admins, Managed Devices, Secure Score
+2. **Executive Summary** — Maturity assessment, key observations
+3. **Pillar Scores** — Identity and Devices pass rate progress bars
+4. **Identity & Access Analysis** — CA policies table, privileged access review
+5. **Device & Endpoint Analysis** — Compliance stats, policies
+6. **Critical Findings** — Failed tests sorted by risk level
+7. **Recommendations** — Immediate / Short-term / Strategic roadmap
+
+### Maturity Levels
+- **Initial** (0-39%) — Minimal Zero Trust adoption, high risk exposure
+- **Developing** (40-59%) — Basic controls in place, significant work needed
+- **Defined** (60-74%) — Core Zero Trust principles established, gaps remain
+- **Managed** (75-89%) — Strong Zero Trust controls with monitoring
+- **Optimised** (90%+) — Comprehensive implementation with continuous improvement
 
 ### Duration
 - Small tenants (<100 users): 5-7 minutes
@@ -248,17 +292,21 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
 
 ### Files Generated
 - `zerotrust_YYYY-MM-DD_HH-MM.json` — Raw Graph API data
-- `zerotrust_report_YYYY-MM-DD_HH-MM.md` — AI-generated report
+- `zerotrust_summary_YYYY-MM-DD_HH-MM.html` — Styled summary report (always)
+- `zerotrust_ai_report_YYYY-MM-DD_HH-MM.md` — AI analysis (if enabled)
 - `ZeroTrustReport/ZeroTrustAssessmentReport.html` — Microsoft interactive HTML report
 - `ZeroTrustReport/zt-export/ZeroTrustAssessmentReport.json` — Detailed test results
 
 ---
 
-## LLM Integration
+## LLM Integration (Optional)
+
+All tabs now generate instant Python-templated HTML reports **without requiring an LLM**. AI-enhanced analysis is available as an optional checkbox on each tab.
 
 - **Model:** `qwen2.5:14b` on macOS, `qwen2.5:7b` on Windows (via Ollama)
 - **Streaming:** Token-by-token via SSE for real-time rendering
 - **Prompt design:** Strict output templates with anti-hallucination instructions
+- **When to use:** For business narratives, pattern recognition, and client-facing summaries
 
 ---
 
