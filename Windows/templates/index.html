@@ -296,16 +296,16 @@ body {
     font-size:0.9rem;
 }
 
-/* rendered markdown styles - apply to both report panels */
-#reportPanel h1, #ztReportPanel h1 { color:#fff; font-size:1.4rem; margin:0 0 14px; }
-#reportPanel h2, #ztReportPanel h2 { color:#fff; font-size:1.15rem; margin:22px 0 10px; padding-bottom:6px; border-bottom:1px solid #30363d; }
-#reportPanel h3, #ztReportPanel h3 { color:#bc8cff; font-size:1rem; margin:16px 0 8px; }
-#reportPanel p, #ztReportPanel p  { color:#c9d1d9; line-height:1.75; margin-bottom:10px; }
-#reportPanel ul, #ztReportPanel ul,
-#reportPanel ol, #ztReportPanel ol { margin:6px 0 12px 22px; }
-#reportPanel li, #ztReportPanel li { color:#c9d1d9; line-height:1.75; margin-bottom:4px; }
-#reportPanel hr, #ztReportPanel hr { border:none; border-top:1px solid #30363d; margin:18px 0; }
-#reportPanel code, #ztReportPanel code {
+/* rendered markdown styles - apply to all report panels */
+#reportPanel h1, #ztReportPanel h1, #ariReportPanel h1, #m365ReportPanel h1 { color:#fff; font-size:1.4rem; margin:0 0 14px; }
+#reportPanel h2, #ztReportPanel h2, #ariReportPanel h2, #m365ReportPanel h2 { color:#fff; font-size:1.15rem; margin:22px 0 10px; padding-bottom:6px; border-bottom:1px solid #30363d; }
+#reportPanel h3, #ztReportPanel h3, #ariReportPanel h3, #m365ReportPanel h3 { color:#bc8cff; font-size:1rem; margin:16px 0 8px; }
+#reportPanel p, #ztReportPanel p, #ariReportPanel p, #m365ReportPanel p { color:#c9d1d9; line-height:1.75; margin-bottom:10px; }
+#reportPanel ul, #ztReportPanel ul, #ariReportPanel ul, #m365ReportPanel ul,
+#reportPanel ol, #ztReportPanel ol, #ariReportPanel ol, #m365ReportPanel ol { margin:6px 0 12px 22px; }
+#reportPanel li, #ztReportPanel li, #ariReportPanel li, #m365ReportPanel li { color:#c9d1d9; line-height:1.75; margin-bottom:4px; }
+#reportPanel hr, #ztReportPanel hr, #ariReportPanel hr, #m365ReportPanel hr { border:none; border-top:1px solid #30363d; margin:18px 0; }
+#reportPanel code, #ztReportPanel code, #ariReportPanel code, #m365ReportPanel code {
     background:#1c2128;
     border:1px solid #30363d;
     padding:1px 6px;
@@ -314,13 +314,13 @@ body {
     color:#f0883e;
 }
 /* tables from marked */
-#reportPanel table, #ztReportPanel table { width:100%; border-collapse:collapse; margin:12px 0; font-size:0.82rem; }
-#reportPanel th, #ztReportPanel th { background:#0d1117; color:#7d8590; text-align:left; padding:7px 10px; border-bottom:2px solid #30363d; font-weight:600; }
-#reportPanel td, #ztReportPanel td { padding:6px 10px; border-bottom:1px solid #30363d; color:#c9d1d9; }
-#reportPanel tr:hover td, #ztReportPanel tr:hover td { background:rgba(88,166,255,0.06); }
-#reportPanel pre, #ztReportPanel pre { background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:12px 14px; overflow-x:auto; margin:10px 0; }
-#reportPanel pre code, #ztReportPanel pre code { background:none; border:none; padding:0; color:#c9d1d9; font-size:0.78rem; }
-#reportPanel blockquote, #ztReportPanel blockquote { border-left:3px solid #039be5; padding:4px 12px; background:rgba(88,166,255,0.06); border-radius:0 6px 6px 0; margin:8px 0; color:#c9d1d9; }
+#reportPanel table, #ztReportPanel table, #ariReportPanel table, #m365ReportPanel table { width:100%; border-collapse:collapse; margin:12px 0; font-size:0.82rem; }
+#reportPanel th, #ztReportPanel th, #ariReportPanel th, #m365ReportPanel th { background:#0d1117; color:#7d8590; text-align:left; padding:7px 10px; border-bottom:2px solid #30363d; font-weight:600; }
+#reportPanel td, #ztReportPanel td, #ariReportPanel td, #m365ReportPanel td { padding:6px 10px; border-bottom:1px solid #30363d; color:#c9d1d9; }
+#reportPanel tr:hover td, #ztReportPanel tr:hover td, #ariReportPanel tr:hover td, #m365ReportPanel tr:hover td { background:rgba(88,166,255,0.06); }
+#reportPanel pre, #ztReportPanel pre, #ariReportPanel pre, #m365ReportPanel pre { background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:12px 14px; overflow-x:auto; margin:10px 0; }
+#reportPanel pre code, #ztReportPanel pre code, #ariReportPanel pre code, #m365ReportPanel pre code { background:none; border:none; padding:0; color:#c9d1d9; font-size:0.78rem; }
+#reportPanel blockquote, #ztReportPanel blockquote, #ariReportPanel blockquote, #m365ReportPanel blockquote { border-left:3px solid #039be5; padding:4px 12px; background:rgba(88,166,255,0.06); border-radius:0 6px 6px 0; margin:8px 0; color:#c9d1d9; }
 
 /* severity colours */
 .sev-critical { color:#f85149 !important; font-weight:700; }
@@ -457,6 +457,12 @@ body {
         <button id="scanBtn">SCAN</button>
         <button id="stopScanBtn" class="stop-btn">STOP</button>
     </div>
+    <div class="checkbox-row">
+        <label class="checkbox-label">
+            <input type="checkbox" id="scanUseLlm" />
+            Generate AI-enhanced analysis (adds 2-5 min)
+        </label>
+    </div>
     {% if interfaces %}
     <div class="interfaces">
         {% for name, ip, network in interfaces %}
@@ -520,6 +526,14 @@ body {
         <label class="checkbox-label">
             <input type="checkbox" id="m365SkipMaester" />
             Skip Maester security tests
+        </label>
+        <label class="checkbox-label" style="margin-left: 20px;">
+            <input type="checkbox" id="m365UpdateMaesterTests" />
+            Update Maester tests (refresh cached tests)
+        </label>
+        <label class="checkbox-label" style="margin-left: 20px;">
+            <input type="checkbox" id="m365UseLlm" />
+            Generate AI-enhanced summary (adds 2-3 min)
         </label>
     </div>
     <p style="color:#7d8590; font-size:0.8rem; margin-top:10px; text-align:center;">
@@ -725,6 +739,9 @@ function startScan() {
     // Generate session ID for this scan
     scanSessionId = Date.now().toString();
 
+    // Get options
+    const useLlm = document.getElementById('scanUseLlm').checked;
+
     // reset UI
     reportAccum = '';
     document.getElementById('scanBtn').disabled = true;
@@ -741,7 +758,8 @@ function startScan() {
     es = new EventSource('/scan?target=' + encodeURIComponent(target) +
                          '&client=' + encodeURIComponent(client) +
                          '&depth='  + encodeURIComponent(depth) +
-                         '&session=' + encodeURIComponent(scanSessionId));
+                         '&session=' + encodeURIComponent(scanSessionId) +
+                         '&useLlm=' + useLlm);
 
     // default event → log line
     es.onmessage = e => appendLog(e.data);
@@ -751,7 +769,15 @@ function startScan() {
         appendLog('[*] ' + e.data, 'warn');
     });
 
-    // ── streamed LLM report ──────────────────────────
+    // ── HTML report (structured report - no markdown parsing needed) ──
+    es.addEventListener('report_html', e => {
+        dot('reportDot', 'active');
+        const rp = document.getElementById('reportPanel');
+        rp.innerHTML = e.data;
+        rp.scrollTop = 0;  // Scroll to top for structured report
+    });
+
+    // ── streamed LLM report (markdown - append to existing HTML report) ──
     es.addEventListener('report_chunk', e => {
         reportAccum += e.data;
         dot('reportDot', 'active');
@@ -766,7 +792,14 @@ function startScan() {
         html = html.replace(/<strong>(Low[^<]*)<\/strong>/gi,      '<span class="sev-low">$1</span>');
 
         const rp = document.getElementById('reportPanel');
-        rp.innerHTML = html;
+        // Create or update AI summary section
+        let aiDiv = rp.querySelector('.ai-summary');
+        if (!aiDiv) {
+            aiDiv = document.createElement('div');
+            aiDiv.className = 'ai-summary';
+            rp.appendChild(aiDiv);
+        }
+        aiDiv.innerHTML = html;
         rp.scrollTop = rp.scrollHeight;
     });
 
@@ -774,9 +807,14 @@ function startScan() {
     es.addEventListener('files', e => {
         const f   = JSON.parse(e.data);
         const bar = document.getElementById('dlBar');
-        bar.innerHTML =
-            `<a href="/download/${f.json}" class="dl-btn" download="${f.json}">Download JSON</a>` +
-            `<a href="/download/${f.md}"  class="dl-btn" download="${f.md}">Download Report</a>`;
+        let btns = `<a href="/download/${f.json}" class="dl-btn" download>JSON</a>`;
+        if (f.structured_report) {
+            btns += `<a href="/download/${f.structured_report}" class="dl-btn zt-html" target="_blank">Report HTML</a>`;
+        }
+        if (f.llm_report) {
+            btns += `<a href="/download/${f.llm_report}" class="dl-btn" download>AI Analysis</a>`;
+        }
+        bar.innerHTML = btns;
         bar.classList.add('show');
     });
 
@@ -1166,6 +1204,8 @@ function startM365Assessment() {
 
     // Get options
     const skipMaester = document.getElementById('m365SkipMaester').checked;
+    const updateMaesterTests = document.getElementById('m365UpdateMaesterTests').checked;
+    const useLlm = document.getElementById('m365UseLlm').checked;
 
     // reset UI
     m365ReportAccum = '';
@@ -1181,7 +1221,9 @@ function startM365Assessment() {
 
     const url = '/m365assessment?client=' + encodeURIComponent(client) +
                 '&session=' + encodeURIComponent(m365SessionId) +
-                '&skipMaester=' + skipMaester;
+                '&skipMaester=' + skipMaester +
+                '&updateMaesterTests=' + updateMaesterTests +
+                '&useLlm=' + useLlm;
 
     m365Es = new EventSource(url);
 
@@ -1193,7 +1235,15 @@ function startM365Assessment() {
         m365AppendLog('[*] ' + e.data, 'warn');
     });
 
-    // streamed LLM report
+    // HTML report (structured report - no markdown parsing needed)
+    m365Es.addEventListener('report_html', e => {
+        m365Dot('m365ReportDot', 'active');
+        const rp = document.getElementById('m365ReportPanel');
+        rp.innerHTML = e.data;
+        rp.scrollTop = 0;  // Scroll to top for structured report
+    });
+
+    // streamed LLM report (markdown - append to existing HTML report)
     m365Es.addEventListener('report_chunk', e => {
         m365ReportAccum += e.data;
         m365Dot('m365ReportDot', 'active');
@@ -1206,7 +1256,14 @@ function startM365Assessment() {
         html = html.replace(/<strong>(Low[^<]*)<\/strong>/gi, '<span class="sev-low">$1</span>');
 
         const rp = document.getElementById('m365ReportPanel');
-        rp.innerHTML = html;
+        // Create or update AI summary section
+        let aiDiv = rp.querySelector('.ai-summary');
+        if (!aiDiv) {
+            aiDiv = document.createElement('div');
+            aiDiv.className = 'ai-summary';
+            rp.appendChild(aiDiv);
+        }
+        aiDiv.innerHTML = html;
         rp.scrollTop = rp.scrollHeight;
     });
 
@@ -1215,7 +1272,12 @@ function startM365Assessment() {
         const f = JSON.parse(e.data);
         const bar = document.getElementById('m365DlBar');
         let btns = `<a href="/download/${f.json}" class="dl-btn" download>JSON</a>`;
-        btns += `<a href="/download/${f.md}" class="dl-btn" download>Markdown</a>`;
+        if (f.structured_report) {
+            btns += `<a href="/download/${f.structured_report}" class="dl-btn zt-html" target="_blank">Report HTML</a>`;
+        }
+        if (f.llm_report) {
+            btns += `<a href="/download/${f.llm_report}" class="dl-btn" download>AI Summary</a>`;
+        }
         if (f.maesterHtml) {
             btns += `<a href="/download/${f.maesterHtml}" class="dl-btn zt-html" target="_blank">Maester HTML</a>`;
         }

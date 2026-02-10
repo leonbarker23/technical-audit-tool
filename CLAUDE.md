@@ -343,6 +343,32 @@ See `Windows/requirements.txt` for Python packages.
 
 ## Changelog
 
+### 2026-02-10 (Network Discovery HTML Reports)
+- **✅ Network Discovery HTML Reports** — Hybrid reporting now implemented for network scans
+  - **NetworkTemplatedReport class** in `report_templates.py`:
+    - Generates instant structured HTML report (<1 second)
+    - All risk assessment done in pure Python (no LLM hallucinations)
+    - 5-section format: Executive Summary, Network Inventory, Security Findings, Recommendations, Technical Appendix
+    - High-risk port detection (FTP, Telnet, SNMP, SMB, RDP, NFS, etc.)
+    - Automatic host categorization (Network Infrastructure, Servers, Printers, IoT, etc.)
+    - Risk scoring: Critical → High → Medium → Low based on service exposure
+  - **Updated `/scan` route** in `app.py`:
+    - Always generates Python-templated HTML report first
+    - Optional LLM-enhanced analysis via checkbox (unchecked by default)
+    - New `report_html` SSE event for direct HTML rendering
+    - `report_chunk` event appends AI analysis to existing report
+  - **Updated Network Discovery UI** in `index.html`:
+    - New "Generate AI-enhanced analysis" checkbox (unchecked by default)
+    - `report_html` event handler for instant structured report
+    - Updated download bar: JSON, Report HTML, AI Analysis (if enabled)
+  - **Files Generated**:
+    - `<client>_<target>_<timestamp>.json` — Raw scan data
+    - `<client>_<target>_<timestamp>_report.html` — Styled HTML report (always)
+    - `<client>_<target>_<timestamp>_ai_report.md` — AI analysis (if LLM enabled)
+  - ❌ **TODO: Azure Inventory** — Need to create `AzureTemplatedReport` class
+  - ❌ **TODO: Zero Trust** — Need to create `ZeroTrustTemplatedReport` class
+  - ❌ **TODO: Windows mirror** — All changes need to be mirrored to `Windows/` folder
+
 ### 2026-02-10 (M365 HTML Report Generation)
 - **✅ M365 Assessment HTML Reports** — Converted from Markdown to styled HTML output
   - **HTML Output**: Reports now generate as styled HTML instead of Markdown
@@ -363,14 +389,6 @@ See `Windows/requirements.txt` for Python packages.
   - **Files Generated**:
     - `m365assessment_structured_YYYY-MM-DD_HH-MM.html` — Styled HTML report (always)
     - `m365assessment_report_YYYY-MM-DD_HH-MM.md` — AI summary (if LLM enabled)
-  - **Code Changes**:
-    - `report_templates.py`: Added `standalone` parameter to `generate()` method
-    - `app.py`: Generates standalone HTML for file, embedded HTML for UI
-    - `index.html`: Added `report_html` event handler, updated file downloads
-  - ❌ **TODO: Network Discovery** — Need to create `NetworkTemplatedReport` class
-  - ❌ **TODO: Azure Inventory** — Need to create `AzureTemplatedReport` class
-  - ❌ **TODO: Zero Trust** — Need to create `ZeroTrustTemplatedReport` class
-  - ❌ **TODO: Windows mirror** — All changes need to be mirrored to `Windows/` folder
 
 ### 2026-02-09 (Update 6)
 - **Added Maester test caching** — Significantly faster M365 assessments through intelligent test file caching

@@ -71,6 +71,7 @@ def scan():
     target = request.args.get("target", "").strip()
     client = request.args.get("client", "").strip()
     session_id = request.args.get("session", "").strip()
+    use_llm = request.args.get("useLlm", "").lower() == "true"
 
     if not client or not _CLIENT_RE.match(client):
         return Response(sse("Invalid or missing client name.", event="scan_error"),
@@ -95,14 +96,22 @@ def scan():
                         mimetype="text/event-stream")
 
     def generate():
+        from datetime import datetime
+        from report_templates import NetworkTemplatedReport
+
         tool  = MSPConsultantTool()
         args  = tool.SCAN_PROFILES[scan_depth]
         label = scan_depth.capitalize() + " Scan"
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
 
         yield sse(f"[*] Target  : {target}")
         yield sse(f"[*] Scan    : {label}")
         yield sse(f"[*] Flags   : {args}")
         yield sse("")
+
+        # Create client folder
+        client_folder = os.path.join(BASE_DIR, client)
+        os.makedirs(client_folder, exist_ok=True)
 
         # ── nmap ─────────────────────────────────────
         xml_fd, xml_path = tempfile.mkstemp(suffix=".xml", prefix="nmap_")
@@ -135,36 +144,93 @@ def scan():
                 yield sse("No hosts found in scan results.", event="scan_error")
                 return
 
-            # ── LLM (streamed token-by-token) ────────────
-            yield sse("Generating vulnerability report…", event="status")
             active_data = {ip: info for ip, info in tech_data.items() if info.get("status") == "up"}
-            summary = tool._build_summary(active_data)
-            prompt  = (tool._prompt_single(summary)
-                       if scan_type == "single"
-                       else tool._prompt_subnet(summary, len(active_data)))
+            yield sse(f"[+] Found {len(active_data)} active hosts", event="status")
 
-            report_text = ""
+            # ── Save JSON ────────────────────────────────
+            safe_target = target.replace("/", "-").replace(":", "-")
+            json_file = f"{client}_{safe_target}_{timestamp}.json"
+            json_path = os.path.join(client_folder, json_file)
+            with open(json_path, 'w') as f:
+                json.dump(active_data, f, indent=4)
+
+            # ── ALWAYS generate Python-templated structured report (instant, HTML) ──
+            yield sse("[*] Generating structured report...", event="status")
+
             try:
-                for chunk in ollama.generate(model=tool.model,
-                                             prompt=prompt,
-                                             stream=True):
-                    tok = chunk.get("response", "")
-                    if tok:
-                        report_text += tok
-                        yield sse(tok, event="report_chunk")
-            except Exception as exc:
-                yield sse(f"Ollama error: {exc}\n"
-                          f"Ensure ollama is running and '{tool.model}' is pulled.",
-                          event="scan_error")
+                metadata = {
+                    'client_name': client,
+                    'target': target,
+                    'scan_type': scan_type,
+                    'scan_depth': scan_depth,
+                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M")
+                }
+                template_report = NetworkTemplatedReport(active_data, metadata)
 
-            # ── save to disk ─────────────────────────────
-            json_file, md_file = tool.save_outputs(tech_data, report_text or None, scan_type, client, target)
+                # Generate standalone HTML for file (with full document structure)
+                structured_report_file = template_report.generate(standalone=True)
+                # Generate embedded HTML for web UI (just body content)
+                structured_report_ui = template_report.generate(standalone=False)
+
+                # Save structured report as HTML
+                structured_file = f"{client}_{safe_target}_{timestamp}_report.html"
+                structured_path = os.path.join(client_folder, structured_file)
+                with open(structured_path, "w") as f:
+                    f.write(structured_report_file)
+
+                yield sse(f"[✓] Structured report generated: {structured_file}", event="status")
+                yield sse("")
+
+                # Send embedded HTML to UI (no markdown parsing needed)
+                yield sse(structured_report_ui, event="report_html")
+
+            except Exception as exc:
+                yield sse(f"[!] Error generating structured report: {exc}", event="scan_error")
+                return
+
+            # ── Optional: LLM-enhanced analysis ──────────
+            llm_file = None
+            if use_llm:
+                yield sse("\n\n---\n\n# AI-Enhanced Analysis\n\n", event="report_chunk")
+                yield sse("[*] Generating AI-enhanced analysis...", event="status")
+                yield sse("[*] This may take 2-5 minutes depending on scan size", event="status")
+                yield sse("")
+
+                summary = tool._build_summary(active_data)
+                prompt = (tool._prompt_single(summary)
+                          if scan_type == "single"
+                          else tool._prompt_subnet(summary, len(active_data)))
+
+                report_text = ""
+                try:
+                    for chunk in ollama.generate(model=tool.model,
+                                                 prompt=prompt,
+                                                 stream=True):
+                        tok = chunk.get("response", "")
+                        if tok:
+                            report_text += tok
+                            yield sse(tok, event="report_chunk")
+
+                    # Save AI report as markdown
+                    llm_file = f"{client}_{safe_target}_{timestamp}_ai_report.md"
+                    llm_path = os.path.join(client_folder, llm_file)
+                    with open(llm_path, "w") as f:
+                        f.write(report_text)
+
+                except Exception as exc:
+                    yield sse(f"Ollama error: {exc}", event="scan_error")
+                    yield sse(f"Ensure ollama is running and '{tool.model}' is pulled.", event="scan_error")
+                    yield sse("Note: Structured report was already generated successfully.", event="status")
 
             # ── notify browser of generated files ────────
-            yield sse(json.dumps({
+            files_data = {
                 "json": f"{client}/{json_file}",
-                "md":   f"{client}/{md_file}",
-            }), event="files")
+                "structured_report": f"{client}/{structured_file}",
+            }
+            if use_llm and llm_file:
+                files_data["llm_report"] = f"{client}/{llm_file}"
+
+            yield sse(json.dumps(files_data), event="files")
             yield sse("Scan and analysis complete.", event="done")
 
         finally:

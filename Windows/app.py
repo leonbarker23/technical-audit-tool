@@ -8,11 +8,10 @@ import webbrowser
 import threading
 import ipaddress
 import socket
-import shutil
 
 import ollama
 from flask import Flask, Response, request, stream_with_context, render_template, send_from_directory
-from scan import MSPConsultantTool, classify_target, _get_local_interfaces, is_admin, _find_nmap, ensure_dependencies
+from scan import MSPConsultantTool, classify_target, _get_local_interfaces
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__)) or os.getcwd()
 
@@ -27,25 +26,6 @@ _CLIENT_RE = re.compile(r'^[A-Za-z0-9 _-]+$')
 
 # Track active processes by session ID for stop functionality
 _active_processes = {}
-
-# Regex to strip ANSI escape codes from PowerShell output
-_ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-
-
-def _find_powershell7():
-    """Find PowerShell 7 executable on Windows."""
-    # Check for pwsh in PATH
-    pwsh_path = shutil.which("pwsh")
-    if pwsh_path:
-        return pwsh_path
-    # Check common install locations
-    for path in [
-        r'C:\Program Files\PowerShell\7\pwsh.exe',
-        os.path.expandvars(r'%ProgramFiles%\PowerShell\7\pwsh.exe'),
-    ]:
-        if os.path.exists(path):
-            return path
-    return None
 
 
 def _validate_target(target: str) -> bool:
@@ -91,6 +71,7 @@ def scan():
     target = request.args.get("target", "").strip()
     client = request.args.get("client", "").strip()
     session_id = request.args.get("session", "").strip()
+    use_llm = request.args.get("useLlm", "").lower() == "true"
 
     if not client or not _CLIENT_RE.match(client):
         return Response(sse("Invalid or missing client name.", event="scan_error"),
@@ -115,26 +96,32 @@ def scan():
                         mimetype="text/event-stream")
 
     def generate():
+        from datetime import datetime
+        from report_templates import NetworkTemplatedReport
+
         tool  = MSPConsultantTool()
         args  = tool.SCAN_PROFILES[scan_depth]
         label = scan_depth.capitalize() + " Scan"
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
 
         yield sse(f"[*] Target  : {target}")
         yield sse(f"[*] Scan    : {label}")
         yield sse(f"[*] Flags   : {args}")
         yield sse("")
 
+        # Create client folder
+        client_folder = os.path.join(BASE_DIR, client)
+        os.makedirs(client_folder, exist_ok=True)
+
         # ── nmap ─────────────────────────────────────
         xml_fd, xml_path = tempfile.mkstemp(suffix=".xml", prefix="nmap_")
         os.close(xml_fd)
-        nmap_exe = _find_nmap() or 'nmap'
-        cmd  = [nmap_exe] + args.split() + ["-v", "-oX", xml_path, target]
+        cmd  = ["nmap"] + args.split() + ["-v", "-oX", xml_path, target]
         proc = None
 
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT, text=True,
-                                    creationflags=subprocess.CREATE_NO_WINDOW)
+                                    stderr=subprocess.STDOUT, text=True)
 
             # Register process for stop functionality
             if session_id:
@@ -157,36 +144,93 @@ def scan():
                 yield sse("No hosts found in scan results.", event="scan_error")
                 return
 
-            # ── LLM (streamed token-by-token) ────────────
-            yield sse("Generating vulnerability report…", event="status")
             active_data = {ip: info for ip, info in tech_data.items() if info.get("status") == "up"}
-            summary = tool._build_summary(active_data)
-            prompt  = (tool._prompt_single(summary)
-                       if scan_type == "single"
-                       else tool._prompt_subnet(summary, len(active_data)))
+            yield sse(f"[+] Found {len(active_data)} active hosts", event="status")
 
-            report_text = ""
+            # ── Save JSON ────────────────────────────────
+            safe_target = target.replace("/", "-").replace(":", "-")
+            json_file = f"{client}_{safe_target}_{timestamp}.json"
+            json_path = os.path.join(client_folder, json_file)
+            with open(json_path, 'w') as f:
+                json.dump(active_data, f, indent=4)
+
+            # ── ALWAYS generate Python-templated structured report (instant, HTML) ──
+            yield sse("[*] Generating structured report...", event="status")
+
             try:
-                for chunk in ollama.generate(model=tool.model,
-                                             prompt=prompt,
-                                             stream=True):
-                    tok = chunk.get("response", "")
-                    if tok:
-                        report_text += tok
-                        yield sse(tok, event="report_chunk")
-            except Exception as exc:
-                yield sse(f"Ollama error: {exc}\n"
-                          f"Ensure ollama is running and '{tool.model}' is pulled.",
-                          event="scan_error")
+                metadata = {
+                    'client_name': client,
+                    'target': target,
+                    'scan_type': scan_type,
+                    'scan_depth': scan_depth,
+                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M")
+                }
+                template_report = NetworkTemplatedReport(active_data, metadata)
 
-            # ── save to disk ─────────────────────────────
-            json_file, md_file = tool.save_outputs(tech_data, report_text or None, scan_type, client, target)
+                # Generate standalone HTML for file (with full document structure)
+                structured_report_file = template_report.generate(standalone=True)
+                # Generate embedded HTML for web UI (just body content)
+                structured_report_ui = template_report.generate(standalone=False)
+
+                # Save structured report as HTML
+                structured_file = f"{client}_{safe_target}_{timestamp}_report.html"
+                structured_path = os.path.join(client_folder, structured_file)
+                with open(structured_path, "w") as f:
+                    f.write(structured_report_file)
+
+                yield sse(f"[✓] Structured report generated: {structured_file}", event="status")
+                yield sse("")
+
+                # Send embedded HTML to UI (no markdown parsing needed)
+                yield sse(structured_report_ui, event="report_html")
+
+            except Exception as exc:
+                yield sse(f"[!] Error generating structured report: {exc}", event="scan_error")
+                return
+
+            # ── Optional: LLM-enhanced analysis ──────────
+            llm_file = None
+            if use_llm:
+                yield sse("\n\n---\n\n# AI-Enhanced Analysis\n\n", event="report_chunk")
+                yield sse("[*] Generating AI-enhanced analysis...", event="status")
+                yield sse("[*] This may take 2-5 minutes depending on scan size", event="status")
+                yield sse("")
+
+                summary = tool._build_summary(active_data)
+                prompt = (tool._prompt_single(summary)
+                          if scan_type == "single"
+                          else tool._prompt_subnet(summary, len(active_data)))
+
+                report_text = ""
+                try:
+                    for chunk in ollama.generate(model=tool.model,
+                                                 prompt=prompt,
+                                                 stream=True):
+                        tok = chunk.get("response", "")
+                        if tok:
+                            report_text += tok
+                            yield sse(tok, event="report_chunk")
+
+                    # Save AI report as markdown
+                    llm_file = f"{client}_{safe_target}_{timestamp}_ai_report.md"
+                    llm_path = os.path.join(client_folder, llm_file)
+                    with open(llm_path, "w") as f:
+                        f.write(report_text)
+
+                except Exception as exc:
+                    yield sse(f"Ollama error: {exc}", event="scan_error")
+                    yield sse(f"Ensure ollama is running and '{tool.model}' is pulled.", event="scan_error")
+                    yield sse("Note: Structured report was already generated successfully.", event="status")
 
             # ── notify browser of generated files ────────
-            yield sse(json.dumps({
+            files_data = {
                 "json": f"{client}/{json_file}",
-                "md":   f"{client}/{md_file}",
-            }), event="files")
+                "structured_report": f"{client}/{structured_file}",
+            }
+            if use_llm and llm_file:
+                files_data["llm_report"] = f"{client}/{llm_file}"
+
+            yield sse(json.dumps(files_data), event="files")
             yield sse("Scan and analysis complete.", event="done")
 
         finally:
@@ -239,13 +283,14 @@ def zerotrust():
                         mimetype="text/event-stream")
 
     def generate():
+        import shutil
         from datetime import datetime
 
-        # Check for PowerShell 7
-        pwsh_path = _find_powershell7()
+        # Check for PowerShell
+        pwsh_path = shutil.which("pwsh")
         if not pwsh_path:
             yield sse("PowerShell 7 (pwsh) not found.", event="zt_error")
-            yield sse("Install with: winget install Microsoft.PowerShell", event="zt_error")
+            yield sse("Install with: brew install powershell", event="zt_error")
             return
 
         yield sse("[*] PowerShell 7 found: " + pwsh_path)
@@ -262,7 +307,7 @@ def zerotrust():
             yield sse("zerotrust.ps1 script not found.", event="zt_error")
             return
 
-        yield sse("[*] Running Zero Trust Assessment...")
+        yield sse("[*] Running Zero Trust Assessment…")
         yield sse("[*] A browser window will open for Microsoft authentication")
         yield sse("")
 
@@ -284,8 +329,7 @@ def zerotrust():
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                cwd=BASE_DIR,
-                creationflags=subprocess.CREATE_NO_WINDOW
+                cwd=BASE_DIR
             )
 
             # Register process for stop functionality
@@ -295,8 +339,6 @@ def zerotrust():
             in_output_block = False
             for line in proc.stdout:
                 stripped = line.rstrip("\n")
-                # Strip ANSI codes
-                stripped = _ANSI_ESCAPE.sub('', stripped)
 
                 # Parse output file markers
                 if stripped == "=== OUTPUT_FILES ===":
@@ -337,14 +379,14 @@ def zerotrust():
                 return
 
             # Load the assessment data
-            yield sse("Parsing assessment data...", event="status")
+            yield sse("Parsing assessment data…", event="status")
             with open(os.path.join(BASE_DIR, json_file), "r") as f:
                 assessment_data = json.load(f)
 
             # Load detailed ZT assessment data if available (from Microsoft module)
             zt_assessment_data = None
             if zt_json_file and os.path.exists(os.path.join(BASE_DIR, zt_json_file)):
-                yield sse("Loading detailed Microsoft assessment data...", event="status")
+                yield sse("Loading detailed Microsoft assessment data…", event="status")
                 try:
                     with open(os.path.join(BASE_DIR, zt_json_file), "r", encoding="utf-8-sig") as f:
                         zt_assessment_data = json.load(f)
@@ -352,7 +394,7 @@ def zerotrust():
                     yield sse(f"[!] Could not load detailed data: {e}")
 
             # Generate AI analysis
-            yield sse("Generating Zero Trust analysis report...", event="status")
+            yield sse("Generating Zero Trust analysis report…", event="status")
 
             prompt = _zerotrust_prompt(assessment_data, zt_assessment_data)
             report_text = ""
@@ -416,13 +458,14 @@ def azureinventory():
                         mimetype="text/event-stream")
 
     def generate():
+        import shutil
         from datetime import datetime
 
-        # Check for PowerShell 7
-        pwsh_path = _find_powershell7()
+        # Check for PowerShell
+        pwsh_path = shutil.which("pwsh")
         if not pwsh_path:
             yield sse("PowerShell 7 (pwsh) not found.", event="ari_error")
-            yield sse("Install with: winget install Microsoft.PowerShell", event="ari_error")
+            yield sse("Install with: brew install powershell", event="ari_error")
             return
 
         yield sse("[*] PowerShell 7 found: " + pwsh_path)
@@ -466,19 +509,21 @@ def azureinventory():
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                cwd=BASE_DIR,
-                creationflags=subprocess.CREATE_NO_WINDOW
+                cwd=BASE_DIR
             )
 
             # Register process for stop functionality
             if session_id:
                 _active_processes[session_id] = proc
 
+            # Regex to strip ANSI escape codes
+            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
             in_output_block = False
             for line in proc.stdout:
                 stripped = line.rstrip("\n")
                 # Remove ANSI color codes
-                stripped = _ANSI_ESCAPE.sub('', stripped)
+                stripped = ansi_escape.sub('', stripped)
 
                 # Parse output file markers
                 if stripped == "=== OUTPUT_FILES ===":
@@ -801,19 +846,21 @@ def m365assessment():
     session_id = request.args.get("session", "").strip()
     skip_maester = request.args.get("skipMaester", "").lower() == "true"
     update_maester_tests = request.args.get("updateMaesterTests", "").lower() == "true"
+    use_llm = request.args.get("useLlm", "").lower() == "true"
 
     if not client or not _CLIENT_RE.match(client):
         return Response(sse("Invalid or missing client name.", event="m365_error"),
                         mimetype="text/event-stream")
 
     def generate():
+        import shutil
         from datetime import datetime
 
-        # Check for PowerShell 7
-        pwsh_path = _find_powershell7()
+        # Check for PowerShell
+        pwsh_path = shutil.which("pwsh")
         if not pwsh_path:
             yield sse("PowerShell 7 (pwsh) not found.", event="m365_error")
-            yield sse("Install with: winget install Microsoft.PowerShell", event="m365_error")
+            yield sse("Install with: brew install powershell", event="m365_error")
             return
 
         yield sse("[*] PowerShell 7 found: " + pwsh_path)
@@ -859,19 +906,21 @@ def m365assessment():
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                cwd=BASE_DIR,
-                creationflags=subprocess.CREATE_NO_WINDOW
+                cwd=BASE_DIR
             )
 
             # Register process for stop functionality
             if session_id:
                 _active_processes[session_id] = proc
 
+            # Regex to strip ANSI escape codes
+            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
             in_output_block = False
             for line in proc.stdout:
                 stripped = line.rstrip("\n")
                 # Remove ANSI color codes
-                stripped = _ANSI_ESCAPE.sub('', stripped)
+                stripped = ansi_escape.sub('', stripped)
 
                 # Parse output file markers
                 if stripped == "=== OUTPUT_FILES ===":
@@ -928,7 +977,6 @@ def m365assessment():
                 except Exception as e:
                     yield sse(f"[!] Could not read Maester report: {e}", event="status")
 
-            # Generate AI analysis
             import time
 
             # Calculate tenant size for logging
@@ -936,57 +984,92 @@ def m365assessment():
             tenant_size = "small" if total_users < 100 else "medium" if total_users < 1000 else "large"
 
             yield sse(f"[*] Tenant size: {total_users} users ({tenant_size})", event="status")
-            yield sse(f"[*] Generating AI analysis report...", event="status")
-            yield sse(f"[*] This may take 2-3 minutes for small tenants, 5-7 for medium, 8-12 for large", event="status")
-            yield sse("")
 
-            prompt = _m365assessment_prompt(assessment_data, maester_md_content)
-            prompt_size = len(prompt)
-            yield sse(f"[*] Prompt size: {prompt_size:,} characters (~{prompt_size//4:,} tokens)", event="status")
-
-            report_text = ""
-            start_time = time.time()
-            last_progress_time = start_time
-            token_count = 0
+            # ALWAYS generate Python-templated structured report (instant, HTML)
+            yield sse(f"[*] Generating structured report...", event="status")
 
             try:
-                for chunk in ollama.generate(model="qwen2.5:7b",
-                                             prompt=prompt,
-                                             stream=True):
-                    tok = chunk.get("response", "")
-                    if tok:
-                        report_text += tok
-                        token_count += 1
-                        yield sse(tok, event="report_chunk")
+                from report_templates import M365TemplatedReport
+                template_report = M365TemplatedReport(assessment_data)
 
-                        # Progress indicator every 10 seconds
-                        current_time = time.time()
-                        if current_time - last_progress_time >= 10:
-                            elapsed = int(current_time - start_time)
-                            yield sse(f"[*] Still generating... ({elapsed}s elapsed, {token_count} tokens)", event="status")
-                            last_progress_time = current_time
+                # Generate standalone HTML for file (with full document structure)
+                structured_report_file = template_report.generate(standalone=True)
+                # Generate embedded HTML for web UI (just body content)
+                structured_report_ui = template_report.generate(standalone=False)
 
-                # Final timing
-                elapsed_total = int(time.time() - start_time)
-                yield sse(f"[+] Report generated in {elapsed_total}s ({token_count} tokens, {token_count/elapsed_total:.1f} tok/s)", event="status")
+                # Save structured report as HTML
+                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+                structured_file = f"m365assessment_structured_{timestamp}.html"
+                structured_path = os.path.join(client_folder, structured_file)
+                with open(structured_path, "w") as f:
+                    f.write(structured_report_file)
+
+                yield sse(f"[✓] Structured report generated: {structured_file}", event="status")
+                yield sse("")
+
+                # Send embedded HTML to UI (no markdown parsing needed)
+                yield sse(structured_report_ui, event="report_html")
 
             except Exception as exc:
-                yield sse(f"Ollama error: {exc}", event="m365_error")
-                yield sse("Ensure ollama is running and 'qwen2.5:7b' model is available.", event="m365_error")
-                return
+                yield sse(f"[!] Error generating structured report: {exc}", event="m365_error")
+                # Continue even if structured report fails
 
-            # Save the markdown report
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-            md_file = f"m365assessment_report_{timestamp}.md"
-            md_path = os.path.join(client_folder, md_file)
-            with open(md_path, "w") as f:
-                f.write(report_text)
+            # Optional: LLM-enhanced executive summary
+            llm_file = None
+            if use_llm:
+                yield sse("\n\n---\n\n# AI-Enhanced Executive Summary\n\n", event="report_chunk")
+                yield sse(f"[*] Generating AI-enhanced executive summary...", event="status")
+                yield sse(f"[*] This may take 2-3 minutes for small tenants, 5-7 for medium, 8-12 for large", event="status")
+                yield sse("")
+
+                prompt = _m365assessment_prompt(assessment_data, maester_md_content)
+                prompt_size = len(prompt)
+                yield sse(f"[*] Prompt size: {prompt_size:,} characters (~{prompt_size//4:,} tokens)", event="status")
+
+                report_text = ""
+                start_time = time.time()
+                last_progress_time = start_time
+                token_count = 0
+
+                try:
+                    for chunk in ollama.generate(model="qwen2.5:7b",
+                                                 prompt=prompt,
+                                                 stream=True):
+                        tok = chunk.get("response", "")
+                        if tok:
+                            report_text += tok
+                            token_count += 1
+                            yield sse(tok, event="report_chunk")
+
+                            # Progress indicator every 10 seconds
+                            current_time = time.time()
+                            if current_time - last_progress_time >= 10:
+                                elapsed = int(current_time - start_time)
+                                yield sse(f"[*] Still generating... ({elapsed}s elapsed, {token_count} tokens)", event="status")
+                                last_progress_time = current_time
+
+                    # Final timing
+                    elapsed_total = int(time.time() - start_time)
+                    yield sse(f"[+] AI summary generated in {elapsed_total}s ({token_count} tokens, {token_count/elapsed_total:.1f} tok/s)", event="status")
+
+                    # Save the LLM report
+                    llm_file = f"m365assessment_report_{timestamp}.md"
+                    llm_path = os.path.join(client_folder, llm_file)
+                    with open(llm_path, "w") as f:
+                        f.write(report_text)
+
+                except Exception as exc:
+                    yield sse(f"Ollama error: {exc}", event="m365_error")
+                    yield sse("Ensure ollama is running and 'qwen2.5:7b' model is available.", event="m365_error")
+                    yield sse("Note: Structured report was already generated successfully.", event="status")
 
             # Notify browser of files
             files_data = {
                 "json": json_file,
-                "md": f"{client}/{md_file}",
+                "structured_report": f"{client}/{structured_file}",
             }
+            if use_llm and llm_file:
+                files_data["llm_report"] = f"{client}/{llm_file}"
             if maester_html_file:
                 files_data["maesterHtml"] = maester_html_file
             if maester_json_file:
@@ -1654,29 +1737,16 @@ Be specific - reference the actual test failures. Use blank lines for readabilit
 
 def _open_browser():
     import time
-    time.sleep(1.5)
-    try:
-        webbrowser.open("http://127.0.0.1:5000")
-    except Exception:
-        pass  # Ignore browser open errors
+    time.sleep(1)
+    webbrowser.open("http://127.0.0.1:5000")
 
 
 if __name__ == "__main__":
-    if not is_admin():
-        print("[!] nmap requires Administrator privileges for OS detection (-O).")
-        print("    Right-click Command Prompt → Run as administrator")
+    if os.geteuid() != 0:
+        print("[!] nmap requires root for OS detection (-O).")
+        print("    Run with: sudo venv/bin/python app.py")
         sys.exit(1)
 
-    # Check and install dependencies
-    print("[*] Checking dependencies...")
-    if not ensure_dependencies():
-        print("\n[!] Some dependencies are missing. Please install them and try again.")
-        sys.exit(1)
-    print()
-
-    print("[*] Technical Audit Analysis → http://127.0.0.1:5000")
-    print("[*] Opening browser...")
+    print("[*] Discovery Tool → http://127.0.0.1:5000")
     threading.Thread(target=_open_browser, daemon=True).start()
-    print("[*] Server starting... (press Ctrl+C to stop)")
-    print()
     app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)

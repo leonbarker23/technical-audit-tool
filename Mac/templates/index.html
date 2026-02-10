@@ -457,6 +457,12 @@ body {
         <button id="scanBtn">SCAN</button>
         <button id="stopScanBtn" class="stop-btn">STOP</button>
     </div>
+    <div class="checkbox-row">
+        <label class="checkbox-label">
+            <input type="checkbox" id="scanUseLlm" />
+            Generate AI-enhanced analysis (adds 2-5 min)
+        </label>
+    </div>
     {% if interfaces %}
     <div class="interfaces">
         {% for name, ip, network in interfaces %}
@@ -733,6 +739,9 @@ function startScan() {
     // Generate session ID for this scan
     scanSessionId = Date.now().toString();
 
+    // Get options
+    const useLlm = document.getElementById('scanUseLlm').checked;
+
     // reset UI
     reportAccum = '';
     document.getElementById('scanBtn').disabled = true;
@@ -749,7 +758,8 @@ function startScan() {
     es = new EventSource('/scan?target=' + encodeURIComponent(target) +
                          '&client=' + encodeURIComponent(client) +
                          '&depth='  + encodeURIComponent(depth) +
-                         '&session=' + encodeURIComponent(scanSessionId));
+                         '&session=' + encodeURIComponent(scanSessionId) +
+                         '&useLlm=' + useLlm);
 
     // default event → log line
     es.onmessage = e => appendLog(e.data);
@@ -759,7 +769,15 @@ function startScan() {
         appendLog('[*] ' + e.data, 'warn');
     });
 
-    // ── streamed LLM report ──────────────────────────
+    // ── HTML report (structured report - no markdown parsing needed) ──
+    es.addEventListener('report_html', e => {
+        dot('reportDot', 'active');
+        const rp = document.getElementById('reportPanel');
+        rp.innerHTML = e.data;
+        rp.scrollTop = 0;  // Scroll to top for structured report
+    });
+
+    // ── streamed LLM report (markdown - append to existing HTML report) ──
     es.addEventListener('report_chunk', e => {
         reportAccum += e.data;
         dot('reportDot', 'active');
@@ -774,7 +792,14 @@ function startScan() {
         html = html.replace(/<strong>(Low[^<]*)<\/strong>/gi,      '<span class="sev-low">$1</span>');
 
         const rp = document.getElementById('reportPanel');
-        rp.innerHTML = html;
+        // Create or update AI summary section
+        let aiDiv = rp.querySelector('.ai-summary');
+        if (!aiDiv) {
+            aiDiv = document.createElement('div');
+            aiDiv.className = 'ai-summary';
+            rp.appendChild(aiDiv);
+        }
+        aiDiv.innerHTML = html;
         rp.scrollTop = rp.scrollHeight;
     });
 
@@ -782,9 +807,14 @@ function startScan() {
     es.addEventListener('files', e => {
         const f   = JSON.parse(e.data);
         const bar = document.getElementById('dlBar');
-        bar.innerHTML =
-            `<a href="/download/${f.json}" class="dl-btn" download="${f.json}">Download JSON</a>` +
-            `<a href="/download/${f.md}"  class="dl-btn" download="${f.md}">Download Report</a>`;
+        let btns = `<a href="/download/${f.json}" class="dl-btn" download>JSON</a>`;
+        if (f.structured_report) {
+            btns += `<a href="/download/${f.structured_report}" class="dl-btn zt-html" target="_blank">Report HTML</a>`;
+        }
+        if (f.llm_report) {
+            btns += `<a href="/download/${f.llm_report}" class="dl-btn" download>AI Analysis</a>`;
+        }
+        bar.innerHTML = btns;
         bar.classList.add('show');
     });
 
