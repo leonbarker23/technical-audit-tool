@@ -656,6 +656,12 @@ body {
         <button id="ztAssessBtn">RUN ASSESSMENT</button>
         <button id="ztStopBtn" class="stop-btn">STOP</button>
     </div>
+    <div class="checkbox-row">
+        <label class="checkbox-label">
+            <input type="checkbox" id="ztUseLlm" />
+            Generate AI-enhanced analysis (adds 5-10 min)
+        </label>
+    </div>
     <p style="color:#7d8590; font-size:0.8rem; margin-top:10px; text-align:center;">
         Requires PowerShell 7 and will prompt for Microsoft 365 authentication (Global Reader or Admin)
     </p>
@@ -680,14 +686,14 @@ body {
         </div>
     </div>
 
-    <!-- right: AI report -->
+    <!-- right: report -->
     <div class="panel">
         <div class="panel-head">
             <div class="dot" id="ztReportDot"></div>
-            <span>Zero Trust Analysis</span>
+            <span>Zero Trust Report</span>
         </div>
         <div id="ztReportPanel" class="report-panel">
-            <p class="placeholder">The Zero Trust analysis will appear here once the assessment is complete.</p>
+            <p class="placeholder">The Zero Trust report will appear here once the assessment is complete.</p>
         </div>
         <div class="dl-bar" id="ztDlBar"></div>
     </div>
@@ -917,12 +923,15 @@ function startZtAssessment() {
     // Generate session ID for this assessment
     ztSessionId = Date.now().toString();
 
+    // Get options
+    const useLlm = document.getElementById('ztUseLlm').checked;
+
     // reset UI
     ztReportAccum = '';
     document.getElementById('ztAssessBtn').disabled = true;
     document.getElementById('ztStopBtn').classList.add('show');
     document.getElementById('ztLogPanel').innerHTML = '';
-    document.getElementById('ztReportPanel').innerHTML = '<p class="placeholder">Waiting for analysis…</p>';
+    document.getElementById('ztReportPanel').innerHTML = '<p class="placeholder">Waiting for report…</p>';
     document.getElementById('ztDlBar').classList.remove('show');
     document.getElementById('ztDlBar').innerHTML = '';
     ztDot('ztLogDot', 'active');
@@ -930,7 +939,8 @@ function startZtAssessment() {
     ztSetStatus('Starting Zero Trust Assessment…', 'scanning');
 
     ztEs = new EventSource('/zerotrust?client=' + encodeURIComponent(client) +
-                           '&session=' + encodeURIComponent(ztSessionId));
+                           '&session=' + encodeURIComponent(ztSessionId) +
+                           '&useLlm=' + useLlm);
 
     // default event → log line
     ztEs.onmessage = e => ztAppendLog(e.data);
@@ -940,10 +950,28 @@ function startZtAssessment() {
         ztAppendLog('[*] ' + e.data, 'warn');
     });
 
-    // streamed LLM report
+    // Python-templated HTML report (instant)
+    ztEs.addEventListener('report_html', e => {
+        const rp = document.getElementById('ztReportPanel');
+        rp.innerHTML = e.data;
+        rp.scrollTop = 0;
+        ztDot('ztReportDot', 'active');
+    });
+
+    // streamed LLM report (appended after HTML report)
     ztEs.addEventListener('report_chunk', e => {
         ztReportAccum += e.data;
         ztDot('ztReportDot', 'active');
+
+        // Append AI analysis section to existing report
+        const rp = document.getElementById('ztReportPanel');
+        let aiSection = rp.querySelector('.ai-analysis-section');
+        if (!aiSection) {
+            aiSection = document.createElement('div');
+            aiSection.className = 'ai-analysis-section';
+            aiSection.innerHTML = '<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">AI-Enhanced Analysis</h2>';
+            rp.appendChild(aiSection);
+        }
 
         let html = marked.parse(ztReportAccum);
         html = html.replace(/\[!\]/g, '<span class="flag">[!]</span>');
@@ -952,8 +980,7 @@ function startZtAssessment() {
         html = html.replace(/<strong>(Medium[^<]*)<\/strong>/gi, '<span class="sev-medium">$1</span>');
         html = html.replace(/<strong>(Low[^<]*)<\/strong>/gi, '<span class="sev-low">$1</span>');
 
-        const rp = document.getElementById('ztReportPanel');
-        rp.innerHTML = html;
+        aiSection.innerHTML = '<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">AI-Enhanced Analysis</h2>' + html;
         rp.scrollTop = rp.scrollHeight;
     });
 
@@ -961,10 +988,15 @@ function startZtAssessment() {
     ztEs.addEventListener('files', e => {
         const f = JSON.parse(e.data);
         const bar = document.getElementById('ztDlBar');
-        bar.innerHTML =
-            `<a href="/download/${f.json}" class="dl-btn" download>JSON</a>` +
-            `<a href="/download/${f.md}" class="dl-btn" download>Markdown</a>` +
-            (f.html ? `<a href="/download/${f.html}" class="dl-btn zt-html" target="_blank">View HTML Report</a>` : '');
+        let btns = `<a href="/download/${f.json}" class="dl-btn" download>JSON</a>`;
+        btns += `<a href="/download/${f.summary_html}" class="dl-btn" download>Summary HTML</a>`;
+        if (f.ms_html) {
+            btns += `<a href="/download/${f.ms_html}" class="dl-btn zt-html" target="_blank">MS ZT Report</a>`;
+        }
+        if (f.llm_report) {
+            btns += `<a href="/download/${f.llm_report}" class="dl-btn" download>AI Analysis</a>`;
+        }
+        bar.innerHTML = btns;
         bar.classList.add('show');
     });
 

@@ -9,6 +9,7 @@ Available report generators:
 - M365TemplatedReport: Microsoft 365 tenant assessment
 - NetworkTemplatedReport: Network discovery scan results
 - AzureTemplatedReport: Azure Resource Inventory assessment
+- ZeroTrustTemplatedReport: Microsoft 365 Zero Trust assessment
 """
 
 from datetime import datetime
@@ -2405,4 +2406,543 @@ This Azure environment with <strong>{total_resources:,} resources</strong> acros
 
 <div style="background:linear-gradient(90deg,rgba(232,31,99,0.1),rgba(123,31,162,0.1),rgba(3,155,229,0.1));border:1px solid #30363d;border-radius:6px;padding:16px;margin-top:24px;">
     <p style="margin:0;color:#c9d1d9;font-size:0.9rem;"><strong>Need help implementing these recommendations?</strong> Our team can assist with Azure optimisation, security hardening, and managed services.</p>
+</div>'''
+
+
+class ZeroTrustTemplatedReport(ReportSection):
+    """Python-templated Zero Trust Assessment report generator (HTML output).
+
+    Takes Zero Trust assessment JSON data (basic metrics + Microsoft ZT module results)
+    and generates a structured security assessment report with maturity scoring,
+    pillar analysis, and recommendations.
+    """
+
+    # Zero Trust maturity levels
+    MATURITY_LEVELS = {
+        "Optimised": {"min_score": 90, "color": "#3fb950", "description": "Comprehensive Zero Trust implementation with continuous improvement"},
+        "Managed": {"min_score": 75, "color": "#7ee787", "description": "Strong Zero Trust controls with monitoring and automation"},
+        "Defined": {"min_score": 60, "color": "#d29922", "description": "Core Zero Trust principles established, gaps remain"},
+        "Developing": {"min_score": 40, "color": "#f0883e", "description": "Basic controls in place, significant work needed"},
+        "Initial": {"min_score": 0, "color": "#f85149", "description": "Minimal Zero Trust adoption, high risk exposure"},
+    }
+
+    # Test category mappings for grouping
+    CATEGORY_GROUPS = {
+        "Access Control": ["Conditional Access", "Sign-in", "Authentication", "MFA"],
+        "Credential Management": ["Password", "Credential", "Authentication Methods"],
+        "Privileged Access": ["Admin", "Privileged", "Role", "PIM", "Global Administrator"],
+        "Device Management": ["Device", "Compliance", "MDM", "Intune", "Endpoint"],
+        "Application Security": ["App", "Application", "OAuth", "Consent", "Service Principal"],
+        "Data Protection": ["Data", "DLP", "Sensitivity", "Label", "Information Protection"],
+    }
+
+    def __init__(self, basic_data: dict, zt_data: dict = None):
+        """
+        Initialize with assessment data.
+
+        Args:
+            basic_data: Our custom Graph API collection (CA policies, admins, devices, etc.)
+            zt_data: Optional detailed Microsoft ZeroTrustAssessment module results
+        """
+        super().__init__(basic_data)
+        self.basic_data = basic_data
+        self.zt_data = zt_data or {}
+
+        # Extract basic metrics
+        self.metadata = basic_data.get("metadata", {})
+        self.identity = basic_data.get("identity", {})
+        self.devices = basic_data.get("devices", {})
+        self.applications = basic_data.get("applications", {})
+        self.network = basic_data.get("network", {})
+        self.security_score = basic_data.get("securityScore", {})
+
+        # Extract ZT assessment results
+        self.test_summary = self.zt_data.get("TestResultSummary", {})
+        self.tests = self.zt_data.get("Tests", [])
+
+        # Categorize tests
+        self.failed_tests = [t for t in self.tests if t.get("TestStatus") == "Failed"]
+        self.passed_tests = [t for t in self.tests if t.get("TestStatus") == "Passed"]
+        self.investigate_tests = [t for t in self.tests if t.get("TestStatus") == "Investigate"]
+
+    def generate(self, standalone: bool = False) -> str:
+        """
+        Generate the complete HTML report.
+
+        Args:
+            standalone: If True, wrap in full HTML document with styles.
+                       If False, return just the body content (for web UI embedding).
+        """
+        sections = [
+            self._header(),
+            self._section_summary_cards(),
+            self._section_executive_summary(),
+            self._section_pillar_scores(),
+            self._section_identity_analysis(),
+            self._section_device_analysis(),
+            self._section_critical_findings(),
+            self._section_recommendations(),
+            self._section_conclusion()
+        ]
+
+        body = "\n".join(sections)
+
+        if standalone:
+            return self._wrap_standalone(body)
+        return body
+
+    def _wrap_standalone(self, body: str) -> str:
+        """Wrap content in a standalone HTML document."""
+        client = self.metadata.get("clientName", "Unknown")
+        return f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zero Trust Assessment - {client}</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            line-height: 1.6;
+            padding: 24px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }}
+        h1, h2, h3 {{ color: #fff; }}
+        a {{ color: #58a6ff; }}
+        table {{ border-collapse: collapse; width: 100%; margin: 12px 0; }}
+        th, td {{ padding: 10px 12px; text-align: left; border-bottom: 1px solid #30363d; }}
+        th {{ background: #161b22; color: #7d8590; font-weight: 600; }}
+        @media print {{
+            body {{ background: #fff; color: #000; }}
+            th {{ background: #f0f0f0; color: #000; }}
+            td {{ color: #333; }}
+        }}
+    </style>
+</head>
+<body>
+{body}
+</body>
+</html>'''
+
+    def _header(self) -> str:
+        """Generate report header with branding."""
+        client = self.metadata.get("clientName", "Unknown Client")
+        tenant_name = self.metadata.get("tenantName", "")
+        date = self.metadata.get("assessmentDate", "")[:10] if self.metadata.get("assessmentDate") else datetime.now().strftime("%Y-%m-%d")
+        tenant_id = self.metadata.get("tenantId", "")
+
+        tenant_display = f'<span style="color:#7d8590;font-size:0.9rem;">{tenant_name}</span>' if tenant_name else ""
+
+        return f'''<div style="border-bottom:3px solid;border-image:linear-gradient(90deg,#e81f63,#7b1fa2,#039be5) 1;padding-bottom:16px;margin-bottom:24px;">
+    <h1 style="margin:0;font-size:1.75rem;color:#fff;">Zero Trust Assessment</h1>
+    <p style="margin:8px 0 0;color:#7d8590;font-size:1rem;">{client} &mdash; {date}</p>
+    {tenant_display}
+</div>'''
+
+    def _calculate_maturity(self) -> Tuple[str, dict]:
+        """Calculate Zero Trust maturity level based on test results."""
+        if not self.tests:
+            # Fall back to basic metrics if no ZT assessment data
+            score = self.security_score.get("percentage", 0)
+        else:
+            # Calculate based on test pass rate
+            total = len(self.tests)
+            passed = len(self.passed_tests)
+            score = (passed / total * 100) if total > 0 else 0
+
+        for level, info in self.MATURITY_LEVELS.items():
+            if score >= info["min_score"]:
+                return level, {**info, "score": round(score, 1)}
+
+        return "Initial", {**self.MATURITY_LEVELS["Initial"], "score": round(score, 1)}
+
+    def _section_summary_cards(self) -> str:
+        """Generate summary cards with key metrics."""
+        # Calculate maturity
+        maturity_level, maturity_info = self._calculate_maturity()
+
+        # Get counts
+        ca_policies = len(self.identity.get("conditionalAccess", []))
+        global_admins = self.identity.get("privilegedAccess", {}).get("globalAdminCount", 0)
+        device_summary = self.devices.get("summary", {})
+        total_devices = device_summary.get("totalDevices", 0)
+        compliant_devices = device_summary.get("compliant", 0)
+        secure_score = self.security_score.get("percentage", 0)
+
+        # Test results
+        total_tests = len(self.tests)
+        passed_tests = len(self.passed_tests)
+        failed_tests = len(self.failed_tests)
+
+        card_style = '''display:inline-block;background:#161b22;border:1px solid #30363d;
+                       border-radius:8px;padding:16px 20px;margin:8px;min-width:140px;text-align:center;'''
+
+        maturity_card = f'''<div style="{card_style}border-left:4px solid {maturity_info["color"]};">
+        <div style="font-size:1.5rem;font-weight:700;color:{maturity_info["color"]};">{maturity_level}</div>
+        <div style="color:#7d8590;font-size:0.85rem;">Maturity Level</div>
+        <div style="color:#7d8590;font-size:0.75rem;margin-top:4px;">{maturity_info["score"]}% pass rate</div>
+    </div>'''
+
+        tests_card = ""
+        if total_tests > 0:
+            tests_card = f'''<div style="{card_style}">
+        <div style="font-size:2rem;font-weight:700;color:#58a6ff;">{total_tests}</div>
+        <div style="color:#7d8590;font-size:0.85rem;">Security Tests</div>
+        <div style="color:#7d8590;font-size:0.75rem;margin-top:4px;">
+            <span style="color:#3fb950;">{passed_tests} passed</span> &bull;
+            <span style="color:#f85149;">{failed_tests} failed</span>
+        </div>
+    </div>'''
+
+        # Global admin risk badge
+        admin_color = "#3fb950" if 2 <= global_admins <= 4 else "#d29922" if global_admins == 1 or global_admins == 5 else "#f85149"
+
+        return f'''<div style="margin-bottom:24px;">
+    {maturity_card}
+    {tests_card}
+    <div style="{card_style}">
+        <div style="font-size:2rem;font-weight:700;color:#a371f7;">{ca_policies}</div>
+        <div style="color:#7d8590;font-size:0.85rem;">CA Policies</div>
+    </div>
+    <div style="{card_style}">
+        <div style="font-size:2rem;font-weight:700;color:{admin_color};">{global_admins}</div>
+        <div style="color:#7d8590;font-size:0.85rem;">Global Admins</div>
+    </div>
+    <div style="{card_style}">
+        <div style="font-size:2rem;font-weight:700;color:#79c0ff;">{total_devices}</div>
+        <div style="color:#7d8590;font-size:0.85rem;">Managed Devices</div>
+        <div style="color:#7d8590;font-size:0.75rem;margin-top:4px;">
+            <span style="color:#3fb950;">{compliant_devices} compliant</span>
+        </div>
+    </div>
+    <div style="{card_style}">
+        <div style="font-size:2rem;font-weight:700;color:#f0883e;">{secure_score}%</div>
+        <div style="color:#7d8590;font-size:0.85rem;">Secure Score</div>
+    </div>
+</div>'''
+
+    def _section_executive_summary(self) -> str:
+        """Generate executive summary section."""
+        maturity_level, maturity_info = self._calculate_maturity()
+        tenant_name = self.metadata.get("tenantName", "This tenant")
+
+        ca_policies = len(self.identity.get("conditionalAccess", []))
+        global_admins = self.identity.get("privilegedAccess", {}).get("globalAdminCount", 0)
+        failed_count = len(self.failed_tests)
+        total_tests = len(self.tests)
+
+        # Build observations
+        observations = []
+
+        # CA policy observations
+        if ca_policies == 0:
+            observations.append(("Critical", "No Conditional Access policies detected — identity perimeter is not protected"))
+        elif ca_policies < 3:
+            observations.append(("High", f"Only {ca_policies} CA policies — baseline protection likely incomplete"))
+
+        # Global admin observations
+        if global_admins == 0:
+            observations.append(("Medium", "No Global Administrators detected — may indicate permission issues"))
+        elif global_admins == 1:
+            observations.append(("Medium", "Only 1 Global Admin — single point of failure, need break-glass account"))
+        elif global_admins > 5:
+            observations.append(("High", f"{global_admins} Global Admins — excessive privileged access, review for least privilege"))
+
+        # Device compliance
+        device_summary = self.devices.get("summary", {})
+        non_compliant = device_summary.get("nonCompliant", 0)
+        if non_compliant > 0:
+            total = device_summary.get("totalDevices", 0)
+            pct = (non_compliant / total * 100) if total > 0 else 0
+            if pct > 20:
+                observations.append(("High", f"{non_compliant} non-compliant devices ({pct:.0f}%) — significant endpoint risk"))
+            else:
+                observations.append(("Medium", f"{non_compliant} non-compliant devices detected"))
+
+        # Test failures
+        if failed_count > 20:
+            observations.append(("High", f"{failed_count} security tests failed — multiple areas need attention"))
+        elif failed_count > 10:
+            observations.append(("Medium", f"{failed_count} security tests failed — review and prioritise remediation"))
+
+        observations_html = ""
+        if observations:
+            obs_items = []
+            for severity, text in observations:
+                color = "#f85149" if severity in ["Critical", "High"] else "#d29922" if severity == "Medium" else "#7d8590"
+                obs_items.append(f'<li><span style="color:{color};font-weight:600;">[{severity}]</span> {text}</li>')
+            observations_html = f'<ul style="margin:12px 0;padding-left:20px;">{"".join(obs_items)}</ul>'
+
+        summary_text = f"{tenant_name} is currently at the <strong style=\"color:{maturity_info['color']};\">{maturity_level}</strong> maturity level"
+        if total_tests > 0:
+            summary_text += f", with {len(self.passed_tests)} of {total_tests} security tests passing ({maturity_info['score']}%)"
+        summary_text += "."
+
+        return f'''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">1. Executive Summary</h2>
+
+<p style="color:#c9d1d9;margin-bottom:12px;">{summary_text}</p>
+
+<p style="color:#c9d1d9;margin-bottom:12px;"><em>{maturity_info["description"]}</em></p>
+
+{f'<p style="color:#c9d1d9;margin-bottom:8px;"><strong>Key Observations:</strong></p>{observations_html}' if observations_html else ""}
+
+<div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px 16px;margin-top:16px;">
+    <p style="margin:0;color:#7d8590;font-size:0.85rem;"><em>This assessment evaluates Zero Trust maturity across Identity, Devices, Applications, Data, and Network pillars based on Microsoft security best practices.</em></p>
+</div>'''
+
+    def _section_pillar_scores(self) -> str:
+        """Generate pillar-by-pillar score breakdown."""
+        if not self.test_summary:
+            return ""
+
+        identity_passed = self.test_summary.get("IdentityPassed", 0)
+        identity_total = self.test_summary.get("IdentityTotal", 0)
+        devices_passed = self.test_summary.get("DevicesPassed", 0)
+        devices_total = self.test_summary.get("DevicesTotal", 0)
+
+        def pillar_bar(name: str, passed: int, total: int) -> str:
+            if total == 0:
+                return ""
+            pct = (passed / total * 100)
+            color = "#3fb950" if pct >= 80 else "#d29922" if pct >= 60 else "#f85149"
+            return f'''<div style="margin:12px 0;">
+    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+        <span style="color:#c9d1d9;font-weight:600;">{name}</span>
+        <span style="color:{color};">{passed}/{total} ({pct:.0f}%)</span>
+    </div>
+    <div style="background:#30363d;border-radius:4px;height:8px;overflow:hidden;">
+        <div style="background:{color};width:{pct}%;height:100%;"></div>
+    </div>
+</div>'''
+
+        return f'''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">2. Pillar Scores</h2>
+
+<div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:16px;margin:12px 0;">
+{pillar_bar("Identity", identity_passed, identity_total)}
+{pillar_bar("Devices", devices_passed, devices_total)}
+</div>
+
+<p style="color:#7d8590;font-size:0.85rem;margin-top:8px;">Scores reflect the percentage of security tests passed in each Zero Trust pillar.</p>'''
+
+    def _section_identity_analysis(self) -> str:
+        """Generate identity pillar analysis."""
+        ca_policies = self.identity.get("conditionalAccess", [])
+        priv_access = self.identity.get("privilegedAccess", {})
+        auth_methods = self.identity.get("authenticationMethods", {})
+
+        html_parts = ['''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">3. Identity & Access Analysis</h2>''']
+
+        # Conditional Access summary
+        enabled_policies = [p for p in ca_policies if p.get("state") == "enabled"]
+        report_only = [p for p in ca_policies if p.get("state") == "enabledForReportingButNotEnforced"]
+
+        html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">Conditional Access Policies</h3>
+<p style="color:#c9d1d9;margin:8px 0;">
+<strong>{len(enabled_policies)}</strong> enabled &bull;
+<strong>{len(report_only)}</strong> report-only &bull;
+<strong>{len(ca_policies) - len(enabled_policies) - len(report_only)}</strong> disabled
+</p>''')
+
+        if ca_policies:
+            rows = []
+            for policy in ca_policies[:10]:
+                state = policy.get("state", "unknown")
+                state_color = "#3fb950" if state == "enabled" else "#d29922" if "report" in state.lower() else "#7d8590"
+                state_badge = f'<span style="color:{state_color};">{state}</span>'
+                rows.append([policy.get("displayName", "Unknown"), state_badge])
+            ca_table = self.format_table(["Policy Name", "State"], rows)
+            html_parts.append(ca_table)
+
+        # Privileged access
+        global_admins = priv_access.get("globalAdminCount", 0)
+        admin_risk = "Low" if 2 <= global_admins <= 4 else "Medium" if global_admins == 1 or global_admins == 5 else "High"
+
+        html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">Privileged Access</h3>
+<p style="color:#c9d1d9;margin:8px 0;">
+<strong>Global Administrators:</strong> {global_admins} {self.risk_badge(admin_risk)}
+</p>''')
+
+        if global_admins == 1:
+            html_parts.append('<p style="color:#d29922;font-size:0.9rem;">⚠️ Single admin account is a business continuity risk. Create a break-glass emergency access account.</p>')
+        elif global_admins > 5:
+            html_parts.append(f'<p style="color:#f85149;font-size:0.9rem;">⚠️ {global_admins} Global Admins is excessive. Review for least privilege and consider PIM.</p>')
+
+        return "\n".join(html_parts)
+
+    def _section_device_analysis(self) -> str:
+        """Generate device pillar analysis."""
+        device_summary = self.devices.get("summary", {})
+        compliance_policies = self.devices.get("compliancePolicies", [])
+        app_protection = self.applications.get("appProtection", [])
+
+        total_devices = device_summary.get("totalDevices", 0)
+        compliant = device_summary.get("compliant", 0)
+        non_compliant = device_summary.get("nonCompliant", 0)
+
+        html_parts = ['''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">4. Device & Endpoint Analysis</h2>''']
+
+        if total_devices == 0:
+            html_parts.append('''<p style="color:#d29922;margin:12px 0;">⚠️ <strong>No managed devices detected.</strong> This may indicate:</p>
+<ul style="margin:8px 0;padding-left:20px;color:#c9d1d9;">
+    <li>Intune/MDM is not deployed</li>
+    <li>Devices are managed by a third-party MDM</li>
+    <li>Assessment account lacks DeviceManagement permissions</li>
+</ul>''')
+        else:
+            compliance_pct = (compliant / total_devices * 100) if total_devices > 0 else 0
+            compliance_risk = "Low" if compliance_pct >= 90 else "Medium" if compliance_pct >= 70 else "High"
+
+            html_parts.append(f'''<p style="color:#c9d1d9;margin:12px 0;">
+<strong>{total_devices}</strong> managed devices:
+<span style="color:#3fb950;">{compliant} compliant</span> &bull;
+<span style="color:#f85149;">{non_compliant} non-compliant</span>
+({compliance_pct:.0f}% compliance rate) {self.risk_badge(compliance_risk)}
+</p>''')
+
+        # Compliance policies
+        html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">Compliance Policies ({len(compliance_policies)})</h3>''')
+        if compliance_policies:
+            rows = [[p.get("displayName", "Unknown")] for p in compliance_policies[:10]]
+            html_parts.append(self.format_table(["Policy Name"], rows))
+        else:
+            html_parts.append('<p style="color:#d29922;font-size:0.9rem;">⚠️ No device compliance policies detected. Devices cannot be evaluated for compliance.</p>')
+
+        # App protection policies
+        html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">App Protection Policies ({len(app_protection)})</h3>''')
+        if not app_protection:
+            html_parts.append('<p style="color:#d29922;font-size:0.9rem;">⚠️ No app protection policies detected. Consider implementing MAM for BYOD scenarios.</p>')
+
+        return "\n".join(html_parts)
+
+    def _section_critical_findings(self) -> str:
+        """Generate critical findings from failed tests."""
+        if not self.failed_tests:
+            return f'''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">5. Critical Findings</h2>
+<p style="color:#3fb950;margin:12px 0;">✓ No critical security test failures detected.</p>'''
+
+        html_parts = [f'''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">5. Critical Findings ({len(self.failed_tests)} failed tests)</h2>''']
+
+        # Group by risk level
+        high_risk = [t for t in self.failed_tests if t.get("TestRisk", "").lower() == "high"]
+        medium_risk = [t for t in self.failed_tests if t.get("TestRisk", "").lower() == "medium"]
+        low_risk = [t for t in self.failed_tests if t.get("TestRisk", "").lower() not in ["high", "medium"]]
+
+        # Show top failures
+        rows = []
+        for test in (high_risk + medium_risk + low_risk)[:15]:
+            risk = test.get("TestRisk", "Unknown")
+            risk_badge = self.risk_badge(risk.capitalize() if risk else "Low")
+            title = test.get("TestTitle", "Unknown test")
+            category = test.get("TestCategory", "—")
+            rows.append([risk_badge, title[:60] + ("..." if len(title) > 60 else ""), category])
+
+        if rows:
+            html_parts.append(self.format_table(["Risk", "Test", "Category"], rows, highlight_col=0))
+
+        # Summary by category
+        categories = {}
+        for t in self.failed_tests:
+            cat = t.get("TestCategory", "Other")
+            categories[cat] = categories.get(cat, 0) + 1
+
+        if categories:
+            sorted_cats = sorted(categories.items(), key=lambda x: -x[1])[:5]
+            cat_text = ", ".join([f"{cat}: {count}" for cat, count in sorted_cats])
+            html_parts.append(f'<p style="color:#7d8590;font-size:0.85rem;margin-top:12px;"><strong>Failures by category:</strong> {cat_text}</p>')
+
+        return "\n".join(html_parts)
+
+    def _section_recommendations(self) -> str:
+        """Generate recommendations roadmap."""
+        immediate = []
+        short_term = []
+        strategic = []
+
+        ca_policies = len(self.identity.get("conditionalAccess", []))
+        global_admins = self.identity.get("privilegedAccess", {}).get("globalAdminCount", 0)
+        compliance_policies = len(self.devices.get("compliancePolicies", []))
+        app_protection = len(self.applications.get("appProtection", []))
+        device_summary = self.devices.get("summary", {})
+
+        # Build recommendations based on findings
+        if ca_policies == 0:
+            immediate.append("Deploy baseline Conditional Access policies (require MFA, block legacy auth, require compliant devices)")
+        elif ca_policies < 5:
+            short_term.append("Expand Conditional Access coverage with risk-based policies and location controls")
+
+        if global_admins == 1:
+            immediate.append("Create break-glass emergency access account with monitoring")
+        elif global_admins > 5:
+            immediate.append(f"Review and reduce {global_admins} Global Admin accounts — implement least privilege")
+
+        if compliance_policies == 0:
+            immediate.append("Create device compliance policies for Windows, iOS, and Android")
+
+        if app_protection == 0:
+            short_term.append("Implement app protection policies for mobile devices (MAM)")
+
+        non_compliant = device_summary.get("nonCompliant", 0)
+        if non_compliant > 0:
+            immediate.append(f"Remediate {non_compliant} non-compliant devices or block access")
+
+        # From failed tests
+        high_risk_failures = [t for t in self.failed_tests if t.get("TestRisk", "").lower() == "high"]
+        if high_risk_failures:
+            immediate.append(f"Address {len(high_risk_failures)} high-risk security test failures")
+
+        # Strategic
+        strategic.append("Implement Privileged Identity Management (PIM) for just-in-time admin access")
+        strategic.append("Deploy Microsoft Defender for Endpoint for advanced threat protection")
+        strategic.append("Implement sensitivity labels and DLP for data protection")
+
+        html_parts = ['''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">6. Recommendations Roadmap</h2>''']
+
+        if immediate:
+            html_parts.append('''<h3 style="color:#f85149;font-size:1rem;margin:16px 0 8px;">Immediate (0-30 days)</h3>
+<ul style="margin:8px 0;padding-left:20px;color:#c9d1d9;">''')
+            for rec in immediate[:5]:
+                html_parts.append(f'<li>{rec}</li>')
+            html_parts.append('</ul>')
+
+        if short_term:
+            html_parts.append('''<h3 style="color:#d29922;font-size:1rem;margin:16px 0 8px;">Short-term (1-3 months)</h3>
+<ul style="margin:8px 0;padding-left:20px;color:#c9d1d9;">''')
+            for rec in short_term[:5]:
+                html_parts.append(f'<li>{rec}</li>')
+            html_parts.append('</ul>')
+
+        if strategic:
+            html_parts.append('''<h3 style="color:#58a6ff;font-size:1rem;margin:16px 0 8px;">Strategic (3-6 months)</h3>
+<ul style="margin:8px 0;padding-left:20px;color:#c9d1d9;">''')
+            for rec in strategic[:3]:
+                html_parts.append(f'<li>{rec}</li>')
+            html_parts.append('</ul>')
+
+        return "\n".join(html_parts)
+
+    def _section_conclusion(self) -> str:
+        """Generate conclusion section."""
+        maturity_level, maturity_info = self._calculate_maturity()
+        failed_count = len(self.failed_tests)
+
+        return f'''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">7. Conclusion</h2>
+
+<p style="color:#c9d1d9;margin-bottom:12px;">
+This tenant is at the <strong style="color:{maturity_info["color"]};">{maturity_level}</strong> Zero Trust maturity level
+with {failed_count} security findings requiring attention.
+</p>
+
+<p style="color:#c9d1d9;margin-bottom:12px;"><strong>Recommended Next Steps:</strong></p>
+<ol style="margin:8px 0;padding-left:20px;color:#c9d1d9;">
+    <li>Review the Microsoft Zero Trust HTML report for detailed test results</li>
+    <li>Prioritise immediate recommendations (0-30 days)</li>
+    <li>Schedule remediation work for high-risk findings</li>
+    <li>Plan quarterly reassessment to track maturity progression</li>
+</ol>
+
+<div style="background:linear-gradient(90deg,rgba(232,31,99,0.1),rgba(123,31,162,0.1),rgba(3,155,229,0.1));border:1px solid #30363d;border-radius:6px;padding:16px;margin-top:24px;">
+    <p style="margin:0;color:#c9d1d9;font-size:0.9rem;"><strong>Need help implementing Zero Trust?</strong> Our team can assist with Conditional Access deployment, Intune configuration, and security hardening projects.</p>
 </div>'''

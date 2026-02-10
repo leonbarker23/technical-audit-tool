@@ -343,6 +343,34 @@ See `Windows/requirements.txt` for Python packages.
 
 ## Changelog
 
+### 2026-02-10 (Zero Trust HTML Reports)
+- **✅ Zero Trust HTML Reports** — Hybrid reporting now implemented for Zero Trust Assessment
+  - **ZeroTrustTemplatedReport class** in `report_templates.py`:
+    - Generates instant structured HTML report (<1 second) from ZT assessment data
+    - All analysis done in pure Python (no LLM required)
+    - 7-section format: Summary Cards, Executive Summary, Pillar Scores, Identity Analysis, Device Analysis, Critical Findings, Recommendations
+    - Visual summary cards: Maturity Level, Security Tests (passed/failed), CA Policies, Global Admins, Managed Devices, Secure Score
+    - Zero Trust maturity scoring: Initial → Developing → Defined → Managed → Optimised
+    - Pillar score progress bars (Identity, Devices)
+    - Critical findings table with risk badges
+    - Conditional Access policy summary with state badges
+    - Device compliance analysis
+    - Recommendations roadmap: Immediate / Short-term / Strategic
+  - **Updated `/zerotrust` route** in `app.py`:
+    - Always generates Python-templated HTML summary report first
+    - Optional LLM-enhanced analysis via checkbox (unchecked by default)
+    - New `report_html` SSE event for direct HTML rendering
+    - `report_chunk` event appends AI analysis to existing report
+  - **Updated Zero Trust UI** in `index.html`:
+    - New "Generate AI-enhanced analysis (adds 5-10 min)" checkbox (unchecked by default)
+    - `report_html` event handler for instant structured report
+    - Updated download bar: JSON, Summary HTML, MS ZT Report (interactive HTML), AI Analysis (if enabled)
+  - **Files Generated**:
+    - `zerotrust_YYYY-MM-DD_HH-MM.json` — Raw assessment data
+    - `zerotrust_summary_YYYY-MM-DD_HH-MM.html` — Styled summary HTML report (always)
+    - `zerotrust_ai_report_YYYY-MM-DD_HH-MM.md` — AI analysis (if LLM enabled)
+    - `ZeroTrustReport/ZeroTrustAssessmentReport.html` — Microsoft interactive HTML report
+
 ### 2026-02-10 (Azure Inventory HTML Reports)
 - **✅ Azure Inventory HTML Reports** — Hybrid reporting now implemented for Azure Resource Inventory
   - **AzureTemplatedReport class** in `report_templates.py`:
@@ -371,7 +399,6 @@ See `Windows/requirements.txt` for Python packages.
     - `azureinventory_ai_report_YYYY-MM-DD_HH-MM.md` — AI analysis (if LLM enabled)
     - `AzureResourceInventory_Report_*.xlsx` — Full Excel inventory (from ARI)
     - `AzureResourceInventory_Diagram_*.xml` — Network topology (if generated)
-  - ❌ **TODO: Zero Trust** — Need to create `ZeroTrustTemplatedReport` class
 
 ### 2026-02-10 (Network Discovery HTML Reports)
 - **✅ Network Discovery HTML Reports** — Hybrid reporting now implemented for network scans
