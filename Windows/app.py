@@ -452,6 +452,7 @@ def azureinventory():
     session_id = request.args.get("session", "").strip()
     include_security = request.args.get("securityCenter", "").lower() == "true"
     skip_diagram = request.args.get("skipDiagram", "").lower() == "true"
+    use_llm = request.args.get("useLlm", "").lower() == "true"
 
     if not client or not _CLIENT_RE.match(client):
         return Response(sse("Invalid or missing client name.", event="ari_error"),
@@ -569,42 +570,65 @@ def azureinventory():
             with open(os.path.join(BASE_DIR, json_file), "r") as f:
                 inventory_data = json.load(f)
 
-            # Generate AI analysis
-            yield sse("Generating Azure infrastructure analysis report...", event="status")
-
-            prompt = _azureinventory_prompt(inventory_data)
-            report_text = ""
-
-            try:
-                for chunk in ollama.generate(model="qwen2.5:7b",
-                                             prompt=prompt,
-                                             stream=True):
-                    tok = chunk.get("response", "")
-                    if tok:
-                        report_text += tok
-                        yield sse(tok, event="report_chunk")
-            except Exception as exc:
-                yield sse(f"Ollama error: {exc}", event="ari_error")
-                yield sse("Ensure ollama is running and 'qwen2.5:7b' model is available.", event="ari_error")
-                return
-
-            # Save the markdown report
+            # ── Generate Python-templated HTML report (instant) ──
+            yield sse("Generating structured inventory report...", event="status")
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-            md_file = f"azureinventory_report_{timestamp}.md"
             ari_folder = os.path.join(client_folder, "AzureInventory")
-            md_path = os.path.join(ari_folder, md_file)
-            with open(md_path, "w") as f:
-                f.write(report_text)
+
+            from report_templates import AzureTemplatedReport
+            report_gen = AzureTemplatedReport(inventory_data)
+
+            # Generate embedded HTML for web UI
+            report_html = report_gen.generate(standalone=False)
+            yield sse(report_html, event="report_html")
+
+            # Save standalone HTML report
+            html_file = f"azureinventory_report_{timestamp}.html"
+            html_path = os.path.join(ari_folder, html_file)
+            with open(html_path, "w") as f:
+                f.write(report_gen.generate(standalone=True))
+
+            yield sse("[+] Structured HTML report generated")
+
+            # ── Optional: LLM-enhanced analysis ──
+            llm_file = None
+            if use_llm:
+                yield sse("Generating AI-enhanced analysis...", event="status")
+
+                prompt = _azureinventory_prompt(inventory_data)
+                report_text = ""
+
+                try:
+                    for chunk in ollama.generate(model="qwen2.5:7b",
+                                                 prompt=prompt,
+                                                 stream=True):
+                        tok = chunk.get("response", "")
+                        if tok:
+                            report_text += tok
+                            yield sse(tok, event="report_chunk")
+                except Exception as exc:
+                    yield sse(f"Ollama error: {exc}", event="ari_error")
+                    yield sse("Ensure ollama is running and 'qwen2.5:7b' model is available.", event="ari_error")
+                    # Continue without LLM - we already have the HTML report
+
+                if report_text:
+                    # Save the markdown report
+                    llm_file = f"azureinventory_ai_report_{timestamp}.md"
+                    llm_path = os.path.join(ari_folder, llm_file)
+                    with open(llm_path, "w") as f:
+                        f.write(report_text)
 
             # Notify browser of files
             files_data = {
                 "json": json_file,
-                "md": f"{client}/AzureInventory/{md_file}",
+                "html": f"{client}/AzureInventory/{html_file}",
             }
             if excel_file:
                 files_data["excel"] = excel_file
             if diagram_file:
                 files_data["diagram"] = diagram_file
+            if use_llm and llm_file:
+                files_data["llm_report"] = f"{client}/AzureInventory/{llm_file}"
 
             yield sse(json.dumps(files_data), event="files")
             yield sse("Azure Resource Inventory complete.", event="done")

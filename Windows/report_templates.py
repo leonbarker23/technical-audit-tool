@@ -8,6 +8,7 @@ Reports are generated as HTML for clean web UI rendering.
 Available report generators:
 - M365TemplatedReport: Microsoft 365 tenant assessment
 - NetworkTemplatedReport: Network discovery scan results
+- AzureTemplatedReport: Azure Resource Inventory assessment
 """
 
 from datetime import datetime
@@ -1677,3 +1678,731 @@ class NetworkTemplatedReport(ReportSection):
             27017: "Enable MongoDB authentication. Bind to localhost or private interface.",
         }
         return recommendations.get(port, f"Review {service} configuration and restrict access where possible.")
+
+
+class AzureTemplatedReport(ReportSection):
+    """Python-templated Azure Resource Inventory report generator (HTML output).
+
+    Takes Azure inventory JSON data and generates a structured infrastructure
+    assessment report with resource analysis, cost optimisation opportunities,
+    and recommendations.
+    """
+
+    # Azure region display names
+    REGION_NAMES = {
+        "uksouth": "UK South",
+        "ukwest": "UK West",
+        "northeurope": "North Europe",
+        "westeurope": "West Europe",
+        "eastus": "East US",
+        "eastus2": "East US 2",
+        "westus": "West US",
+        "westus2": "West US 2",
+        "centralus": "Central US",
+        "australiaeast": "Australia East",
+        "australiasoutheast": "Australia Southeast",
+        "southeastasia": "Southeast Asia",
+        "eastasia": "East Asia",
+        "japaneast": "Japan East",
+        "japanwest": "Japan West",
+        "brazilsouth": "Brazil South",
+        "canadacentral": "Canada Central",
+        "canadaeast": "Canada East",
+        "germanywestcentral": "Germany West Central",
+        "francecentral": "France Central",
+        "switzerlandnorth": "Switzerland North",
+        "norwayeast": "Norway East",
+        "swedencentral": "Sweden Central",
+    }
+
+    # VM size categories for analysis
+    VM_SIZE_CATEGORIES = {
+        "B": ("Burstable", "Cost-effective for variable workloads"),
+        "D": ("General Purpose", "Balanced compute/memory ratio"),
+        "E": ("Memory Optimised", "High memory-to-core ratio"),
+        "F": ("Compute Optimised", "High CPU-to-memory ratio"),
+        "M": ("Memory Intensive", "Large memory configurations"),
+        "L": ("Storage Optimised", "High disk throughput"),
+        "N": ("GPU Enabled", "AI/ML and graphics workloads"),
+        "H": ("High Performance", "HPC workloads"),
+    }
+
+    def __init__(self, inventory_data: dict):
+        """Initialize with Azure inventory JSON data."""
+        super().__init__(inventory_data)
+        self.metadata = inventory_data.get("metadata", {})
+        self.summary = inventory_data.get("summary", {})
+        self.subscriptions = inventory_data.get("subscriptions", [])
+        self.compute = inventory_data.get("compute", {})
+        self.networking = inventory_data.get("networking", {})
+        self.storage = inventory_data.get("storage", {})
+        self.databases = inventory_data.get("databases", {})
+        self.security = inventory_data.get("security", {})
+
+    def generate(self, standalone: bool = False) -> str:
+        """
+        Generate the complete HTML report.
+
+        Args:
+            standalone: If True, wrap in full HTML document with styles.
+                       If False, return just the body content (for web UI embedding).
+        """
+        sections = [
+            self._header(),
+            self._section_summary_cards(),
+            self._section_executive_summary(),
+            self._section_subscriptions(),
+            self._section_compute(),
+            self._section_networking(),
+            self._section_storage_databases(),
+            self._section_security(),
+            self._section_cost_optimisation(),
+            self._section_recommendations(),
+            self._section_conclusion()
+        ]
+
+        body = "\n".join(sections)
+
+        if standalone:
+            return self._wrap_standalone(body)
+        return body
+
+    def _wrap_standalone(self, body: str) -> str:
+        """Wrap content in a standalone HTML document."""
+        client = self.metadata.get("clientName", "Unknown")
+        date = self.metadata.get("assessmentDate", "")[:10]
+        return f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Azure Resource Inventory - {client}</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            line-height: 1.6;
+            padding: 24px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }}
+        h1, h2, h3 {{ color: #fff; }}
+        a {{ color: #58a6ff; }}
+        table {{ border-collapse: collapse; width: 100%; margin: 12px 0; }}
+        th, td {{ padding: 10px 12px; text-align: left; border-bottom: 1px solid #30363d; }}
+        th {{ background: #161b22; color: #7d8590; font-weight: 600; }}
+        @media print {{
+            body {{ background: #fff; color: #000; }}
+            th {{ background: #f0f0f0; color: #000; }}
+            td {{ color: #333; }}
+        }}
+    </style>
+</head>
+<body>
+{body}
+</body>
+</html>'''
+
+    def _header(self) -> str:
+        """Generate report header with branding."""
+        client = self.metadata.get("clientName", "Unknown Client")
+        date = self.metadata.get("assessmentDate", "")[:10] if self.metadata.get("assessmentDate") else datetime.now().strftime("%Y-%m-%d")
+        tenant_id = self.metadata.get("tenantId", "")
+
+        tenant_display = f'<span style="color:#7d8590;font-size:0.9rem;">Tenant: {tenant_id[:8]}...{tenant_id[-4:]}</span>' if tenant_id and len(tenant_id) > 12 else ""
+
+        return f'''<div style="border-bottom:3px solid;border-image:linear-gradient(90deg,#e81f63,#7b1fa2,#039be5) 1;padding-bottom:16px;margin-bottom:24px;">
+    <h1 style="margin:0;font-size:1.75rem;color:#fff;">Azure Resource Inventory</h1>
+    <p style="margin:8px 0 0;color:#7d8590;font-size:1rem;">{client} &mdash; {date}</p>
+    {tenant_display}
+</div>'''
+
+    def _section_summary_cards(self) -> str:
+        """Generate summary cards with key metrics."""
+        total_resources = self.summary.get("totalResources", 0)
+        subscription_count = self.summary.get("subscriptionCount", 0)
+
+        # Count VMs
+        vms = self.compute.get("virtualMachines", [])
+        vm_count = len(vms)
+        running_vms = sum(1 for vm in vms if "running" in (vm.get("powerState") or "").lower())
+        stopped_vms = vm_count - running_vms
+
+        # Count storage accounts
+        storage_count = len(self.storage.get("storageAccounts", []))
+
+        # Count databases
+        db_count = (len(self.databases.get("sqlServers", [])) +
+                   len(self.databases.get("sqlDatabases", [])) +
+                   len(self.databases.get("cosmosDbAccounts", [])) +
+                   len(self.databases.get("mySqlServers", [])) +
+                   len(self.databases.get("postgreSqlServers", [])))
+
+        # Count networking resources
+        net_count = (len(self.networking.get("virtualNetworks", [])) +
+                    len(self.networking.get("networkSecurityGroups", [])) +
+                    len(self.networking.get("loadBalancers", [])) +
+                    len(self.networking.get("publicIPs", [])))
+
+        card_style = '''display:inline-block;background:#161b22;border:1px solid #30363d;
+                       border-radius:8px;padding:16px 20px;margin:8px;min-width:140px;text-align:center;'''
+
+        return f'''<div style="margin-bottom:24px;">
+    <div style="{card_style}">
+        <div style="font-size:2rem;font-weight:700;color:#58a6ff;">{total_resources:,}</div>
+        <div style="color:#7d8590;font-size:0.85rem;">Total Resources</div>
+    </div>
+    <div style="{card_style}">
+        <div style="font-size:2rem;font-weight:700;color:#a371f7;">{subscription_count}</div>
+        <div style="color:#7d8590;font-size:0.85rem;">Subscriptions</div>
+    </div>
+    <div style="{card_style}">
+        <div style="font-size:2rem;font-weight:700;color:#3fb950;">{vm_count}</div>
+        <div style="color:#7d8590;font-size:0.85rem;">Virtual Machines</div>
+        <div style="color:#7d8590;font-size:0.75rem;margin-top:4px;">
+            <span style="color:#3fb950;">{running_vms} running</span> &bull;
+            <span style="color:#d29922;">{stopped_vms} stopped</span>
+        </div>
+    </div>
+    <div style="{card_style}">
+        <div style="font-size:2rem;font-weight:700;color:#f0883e;">{storage_count}</div>
+        <div style="color:#7d8590;font-size:0.85rem;">Storage Accounts</div>
+    </div>
+    <div style="{card_style}">
+        <div style="font-size:2rem;font-weight:700;color:#79c0ff;">{db_count}</div>
+        <div style="color:#7d8590;font-size:0.85rem;">Databases</div>
+    </div>
+    <div style="{card_style}">
+        <div style="font-size:2rem;font-weight:700;color:#7ee787;">{net_count}</div>
+        <div style="color:#7d8590;font-size:0.85rem;">Network Resources</div>
+    </div>
+</div>'''
+
+    def _section_executive_summary(self) -> str:
+        """Generate executive summary section."""
+        total_resources = self.summary.get("totalResources", 0)
+        subscription_count = self.summary.get("subscriptionCount", 0)
+        resource_types = self.summary.get("resourcesByType", {})
+        locations = self.summary.get("resourcesByLocation", {})
+
+        vms = self.compute.get("virtualMachines", [])
+        running_vms = sum(1 for vm in vms if "running" in (vm.get("powerState") or "").lower())
+        stopped_vms = len(vms) - running_vms
+
+        # Determine environment size
+        if total_resources < 50:
+            env_size = "small"
+            env_desc = "a small Azure footprint"
+        elif total_resources < 200:
+            env_size = "medium"
+            env_desc = "a medium-sized Azure environment"
+        elif total_resources < 500:
+            env_size = "large"
+            env_desc = "a substantial Azure deployment"
+        else:
+            env_size = "enterprise"
+            env_desc = "an enterprise-scale Azure environment"
+
+        # Location summary
+        location_list = sorted(locations.items(), key=lambda x: -x[1])[:3]
+        location_text = ", ".join([f"{self.REGION_NAMES.get(loc, loc)} ({count})" for loc, count in location_list])
+
+        # Observations
+        observations = []
+        if stopped_vms > 0 and stopped_vms >= running_vms * 0.3:
+            observations.append(f"<li><strong>{stopped_vms} stopped/deallocated VMs</strong> detected — potential cost savings or cleanup opportunity</li>")
+        if len(locations) == 1:
+            observations.append("<li><strong>Single-region deployment</strong> — consider DR/availability requirements</li>")
+        elif len(locations) > 3:
+            observations.append(f"<li><strong>Multi-region presence</strong> across {len(locations)} regions — good for availability, review for cost optimisation</li>")
+
+        key_vaults = len(self.security.get("keyVaults", []))
+        if key_vaults == 0:
+            observations.append("<li><strong>No Key Vaults detected</strong> — secrets management may need review</li>")
+
+        observations_html = f"<ul style='margin:12px 0;padding-left:20px;'>{''.join(observations)}</ul>" if observations else ""
+
+        return f'''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">1. Executive Summary</h2>
+
+<p style="color:#c9d1d9;margin-bottom:12px;">
+This assessment covers <strong>{env_desc}</strong> with <strong>{total_resources:,} resources</strong> across
+<strong>{subscription_count} subscription(s)</strong>. The environment includes {len(vms)} virtual machines,
+{len(self.storage.get("storageAccounts", []))} storage accounts, and various networking and database resources.
+</p>
+
+<p style="color:#c9d1d9;margin-bottom:12px;">
+<strong>Primary regions:</strong> {location_text if location_text else "Not determined"}
+</p>
+
+{f'<p style="color:#c9d1d9;margin-bottom:12px;"><strong>Key Observations:</strong></p>{observations_html}' if observations else ""}
+
+<div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px 16px;margin-top:16px;">
+    <p style="margin:0;color:#7d8590;font-size:0.85rem;"><em>This inventory was collected using Azure Resource Inventory (ARI). For detailed resource information, refer to the Excel workbook.</em></p>
+</div>'''
+
+    def _section_subscriptions(self) -> str:
+        """Generate subscriptions overview section."""
+        if not self.subscriptions:
+            return ""
+
+        rows = []
+        for sub in self.subscriptions[:10]:
+            name = sub.get("name", "Unknown")
+            sub_id = sub.get("id", "")
+            state = sub.get("state", "Unknown")
+
+            # Truncate subscription ID for display
+            short_id = f"{sub_id[:8]}...{sub_id[-4:]}" if sub_id and len(sub_id) > 12 else sub_id
+
+            # State badge
+            state_color = "#3fb950" if state.lower() == "enabled" else "#d29922"
+            state_badge = f'<span style="color:{state_color};">{state}</span>'
+
+            rows.append([name, short_id, state_badge])
+
+        table = self.format_table(["Subscription Name", "ID", "State"], rows)
+
+        return f'''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">2. Subscription Overview</h2>
+
+{table}'''
+
+    def _section_compute(self) -> str:
+        """Generate compute resources section."""
+        vms = self.compute.get("virtualMachines", [])
+        app_services = self.compute.get("appServices", [])
+        functions = self.compute.get("functions", [])
+        aks = self.compute.get("aks", [])
+        vmss = self.compute.get("vmScaleSets", [])
+
+        if not any([vms, app_services, functions, aks, vmss]):
+            return f'''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">3. Compute Resources</h2>
+<p style="color:#7d8590;">No compute resources found in this inventory.</p>'''
+
+        html_parts = ['''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">3. Compute Resources</h2>''']
+
+        # Virtual Machines analysis
+        if vms:
+            # Analyse VM sizes
+            vm_by_size = {}
+            vm_by_state = {"running": 0, "stopped": 0, "deallocated": 0, "other": 0}
+            vm_by_os = {"Windows": 0, "Linux": 0, "Other": 0}
+
+            for vm in vms:
+                size = vm.get("vmSize", "Unknown")
+                vm_by_size[size] = vm_by_size.get(size, 0) + 1
+
+                state = (vm.get("powerState") or "").lower()
+                if "running" in state:
+                    vm_by_state["running"] += 1
+                elif "stopped" in state:
+                    vm_by_state["stopped"] += 1
+                elif "deallocated" in state:
+                    vm_by_state["deallocated"] += 1
+                else:
+                    vm_by_state["other"] += 1
+
+                os_type = (vm.get("osType") or "").lower()
+                if "windows" in os_type:
+                    vm_by_os["Windows"] += 1
+                elif "linux" in os_type:
+                    vm_by_os["Linux"] += 1
+                else:
+                    vm_by_os["Other"] += 1
+
+            # VM state breakdown
+            state_html = f'''<p style="color:#c9d1d9;margin:12px 0;">
+<strong>Power States:</strong>
+<span style="color:#3fb950;">Running: {vm_by_state["running"]}</span> &bull;
+<span style="color:#d29922;">Stopped: {vm_by_state["stopped"]}</span> &bull;
+<span style="color:#f85149;">Deallocated: {vm_by_state["deallocated"]}</span>
+</p>'''
+
+            # OS breakdown
+            os_html = f'''<p style="color:#c9d1d9;margin:12px 0;">
+<strong>Operating Systems:</strong> Windows: {vm_by_os["Windows"]} &bull; Linux: {vm_by_os["Linux"]}
+</p>'''
+
+            # Top VM sizes table
+            top_sizes = sorted(vm_by_size.items(), key=lambda x: -x[1])[:10]
+            size_rows = []
+            for size, count in top_sizes:
+                # Determine size category
+                prefix = size.split("_")[0].replace("Standard", "").strip("_") if "_" in size else size[:2]
+                category_info = self.VM_SIZE_CATEGORIES.get(prefix[0].upper(), ("General", ""))
+                size_rows.append([size, str(count), category_info[0]])
+
+            size_table = self.format_table(["VM Size", "Count", "Category"], size_rows)
+
+            html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">Virtual Machines ({len(vms)})</h3>
+{state_html}
+{os_html}
+<p style="color:#7d8590;font-size:0.9rem;margin:12px 0 8px;"><strong>VM Sizes:</strong></p>
+{size_table}''')
+
+        # App Services
+        if app_services:
+            running = sum(1 for a in app_services if (a.get("state") or "").lower() == "running")
+            html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">App Services ({len(app_services)})</h3>
+<p style="color:#c9d1d9;"><span style="color:#3fb950;">{running} running</span> &bull; {len(app_services) - running} stopped/other</p>''')
+
+        # Functions
+        if functions:
+            html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">Azure Functions ({len(functions)})</h3>''')
+
+        # AKS
+        if aks:
+            rows = []
+            for cluster in aks[:5]:
+                rows.append([
+                    cluster.get("name", "Unknown"),
+                    cluster.get("kubernetesVersion", "—"),
+                    str(cluster.get("nodeCount", "—")),
+                    self.REGION_NAMES.get(cluster.get("location", ""), cluster.get("location", "—"))
+                ])
+            aks_table = self.format_table(["Cluster Name", "K8s Version", "Nodes", "Region"], rows)
+            html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">AKS Clusters ({len(aks)})</h3>
+{aks_table}''')
+
+        # VM Scale Sets
+        if vmss:
+            html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">VM Scale Sets ({len(vmss)})</h3>''')
+
+        return "\n".join(html_parts)
+
+    def _section_networking(self) -> str:
+        """Generate networking section."""
+        vnets = self.networking.get("virtualNetworks", [])
+        nsgs = self.networking.get("networkSecurityGroups", [])
+        lbs = self.networking.get("loadBalancers", [])
+        app_gws = self.networking.get("applicationGateways", [])
+        pips = self.networking.get("publicIPs", [])
+
+        if not any([vnets, nsgs, lbs, app_gws, pips]):
+            return f'''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">4. Networking</h2>
+<p style="color:#7d8590;">No networking resources found in this inventory.</p>'''
+
+        html_parts = ['''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">4. Networking</h2>''']
+
+        # Summary counts
+        summary_items = []
+        if vnets:
+            summary_items.append(f"<strong>{len(vnets)}</strong> Virtual Networks")
+        if nsgs:
+            summary_items.append(f"<strong>{len(nsgs)}</strong> Network Security Groups")
+        if lbs:
+            summary_items.append(f"<strong>{len(lbs)}</strong> Load Balancers")
+        if app_gws:
+            summary_items.append(f"<strong>{len(app_gws)}</strong> Application Gateways")
+        if pips:
+            summary_items.append(f"<strong>{len(pips)}</strong> Public IPs")
+
+        html_parts.append(f'<p style="color:#c9d1d9;margin:12px 0;">{" &bull; ".join(summary_items)}</p>')
+
+        # Virtual Networks table
+        if vnets:
+            rows = []
+            for vnet in vnets[:10]:
+                rows.append([
+                    vnet.get("name", "Unknown"),
+                    vnet.get("addressSpace", "—"),
+                    self.REGION_NAMES.get(vnet.get("location", ""), vnet.get("location", "—")),
+                    vnet.get("resourceGroup", "—")
+                ])
+            vnet_table = self.format_table(["VNet Name", "Address Space", "Region", "Resource Group"], rows)
+            html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">Virtual Networks</h3>
+{vnet_table}''')
+
+        # Public IPs (security consideration)
+        if pips:
+            assigned_pips = [p for p in pips if p.get("ipAddress")]
+            html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">Public IP Addresses</h3>
+<p style="color:#c9d1d9;"><strong>{len(assigned_pips)}</strong> assigned public IPs detected — review for security exposure</p>''')
+
+        return "\n".join(html_parts)
+
+    def _section_storage_databases(self) -> str:
+        """Generate storage and databases section."""
+        storage_accounts = self.storage.get("storageAccounts", [])
+        sql_servers = self.databases.get("sqlServers", [])
+        sql_dbs = self.databases.get("sqlDatabases", [])
+        cosmos = self.databases.get("cosmosDbAccounts", [])
+        mysql = self.databases.get("mySqlServers", [])
+        postgres = self.databases.get("postgreSqlServers", [])
+
+        if not any([storage_accounts, sql_servers, sql_dbs, cosmos, mysql, postgres]):
+            return f'''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">5. Storage & Databases</h2>
+<p style="color:#7d8590;">No storage or database resources found in this inventory.</p>'''
+
+        html_parts = ['''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">5. Storage & Databases</h2>''']
+
+        # Storage Accounts
+        if storage_accounts:
+            # Analyse by tier and kind
+            by_tier = {}
+            by_kind = {}
+            for sa in storage_accounts:
+                tier = sa.get("accessTier", "Unknown")
+                by_tier[tier] = by_tier.get(tier, 0) + 1
+                kind = sa.get("kind", "Unknown")
+                by_kind[kind] = by_kind.get(kind, 0) + 1
+
+            tier_text = ", ".join([f"{k}: {v}" for k, v in sorted(by_tier.items(), key=lambda x: -x[1])])
+
+            rows = []
+            for sa in storage_accounts[:10]:
+                rows.append([
+                    sa.get("name", "Unknown"),
+                    sa.get("kind", "—"),
+                    sa.get("accessTier", "—"),
+                    self.REGION_NAMES.get(sa.get("location", ""), sa.get("location", "—"))
+                ])
+            sa_table = self.format_table(["Storage Account", "Kind", "Access Tier", "Region"], rows)
+
+            html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">Storage Accounts ({len(storage_accounts)})</h3>
+<p style="color:#c9d1d9;margin:8px 0;"><strong>By Tier:</strong> {tier_text}</p>
+{sa_table}''')
+
+        # SQL Databases
+        if sql_servers or sql_dbs:
+            html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">Azure SQL</h3>
+<p style="color:#c9d1d9;"><strong>{len(sql_servers)}</strong> SQL Servers &bull; <strong>{len(sql_dbs)}</strong> Databases</p>''')
+
+        # Cosmos DB
+        if cosmos:
+            html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">Cosmos DB ({len(cosmos)})</h3>''')
+
+        # Other databases
+        other_dbs = []
+        if mysql:
+            other_dbs.append(f"MySQL: {len(mysql)}")
+        if postgres:
+            other_dbs.append(f"PostgreSQL: {len(postgres)}")
+        if other_dbs:
+            html_parts.append(f'''<p style="color:#c9d1d9;margin:12px 0;"><strong>Other Databases:</strong> {" &bull; ".join(other_dbs)}</p>''')
+
+        return "\n".join(html_parts)
+
+    def _section_security(self) -> str:
+        """Generate security section."""
+        key_vaults = self.security.get("keyVaults", [])
+        recommendations = self.security.get("recommendations", [])
+
+        html_parts = ['''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">6. Security Posture</h2>''']
+
+        # Key Vaults
+        if key_vaults:
+            rows = []
+            for kv in key_vaults[:10]:
+                rows.append([
+                    kv.get("name", "Unknown"),
+                    self.REGION_NAMES.get(kv.get("location", ""), kv.get("location", "—")),
+                    kv.get("resourceGroup", "—")
+                ])
+            kv_table = self.format_table(["Key Vault", "Region", "Resource Group"], rows)
+            html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">Key Vaults ({len(key_vaults)})</h3>
+{kv_table}''')
+        else:
+            html_parts.append('''<p style="color:#d29922;margin:12px 0;">⚠️ <strong>No Key Vaults detected</strong> — consider implementing centralised secrets management</p>''')
+
+        # Security Center recommendations
+        if recommendations:
+            # Group by severity
+            by_severity = {"High": [], "Medium": [], "Low": []}
+            for rec in recommendations:
+                severity = rec.get("severity", "Low")
+                if severity in by_severity:
+                    by_severity[severity].append(rec)
+
+            html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">Security Recommendations ({len(recommendations)})</h3>
+<p style="color:#c9d1d9;">
+<span style="color:#f85149;">High: {len(by_severity["High"])}</span> &bull;
+<span style="color:#d29922;">Medium: {len(by_severity["Medium"])}</span> &bull;
+<span style="color:#3fb950;">Low: {len(by_severity["Low"])}</span>
+</p>''')
+
+            # Show top high severity recommendations
+            if by_severity["High"]:
+                rows = []
+                for rec in by_severity["High"][:10]:
+                    rows.append([
+                        rec.get("recommendation", "Unknown")[:80],
+                        self.risk_badge("High")
+                    ])
+                rec_table = self.format_table(["Recommendation", "Severity"], rows, highlight_col=1)
+                html_parts.append(f'''<p style="color:#7d8590;font-size:0.9rem;margin:12px 0 8px;"><strong>Top High-Severity Findings:</strong></p>
+{rec_table}''')
+        else:
+            html_parts.append('''<p style="color:#7d8590;margin:12px 0;"><em>Security Center recommendations not included in this scan. Enable "Include Security Center" option for security findings.</em></p>''')
+
+        return "\n".join(html_parts)
+
+    def _section_cost_optimisation(self) -> str:
+        """Generate cost optimisation opportunities section."""
+        vms = self.compute.get("virtualMachines", [])
+        storage_accounts = self.storage.get("storageAccounts", [])
+
+        html_parts = ['''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">7. Cost Optimisation Opportunities</h2>''']
+
+        opportunities = []
+
+        # Stopped/Deallocated VMs
+        stopped_vms = [vm for vm in vms if "stopped" in (vm.get("powerState") or "").lower() or "deallocated" in (vm.get("powerState") or "").lower()]
+        if stopped_vms:
+            vm_list = ", ".join([vm.get("name", "Unknown") for vm in stopped_vms[:5]])
+            if len(stopped_vms) > 5:
+                vm_list += f" +{len(stopped_vms) - 5} more"
+            opportunities.append({
+                "title": f"Stopped/Deallocated VMs ({len(stopped_vms)})",
+                "description": f"Review for deletion or snapshot-and-delete: {vm_list}",
+                "impact": "High" if len(stopped_vms) > 3 else "Medium",
+                "type": "cleanup"
+            })
+
+        # Reserved Instance candidates (running VMs)
+        running_vms = [vm for vm in vms if "running" in (vm.get("powerState") or "").lower()]
+        if len(running_vms) >= 3:
+            opportunities.append({
+                "title": f"Reserved Instance Candidates ({len(running_vms)} running VMs)",
+                "description": "Long-running VMs may benefit from 1 or 3-year Reserved Instance pricing (up to 72% savings)",
+                "impact": "High",
+                "type": "savings"
+            })
+
+        # Storage tier optimisation
+        hot_storage = [sa for sa in storage_accounts if (sa.get("accessTier") or "").lower() == "hot"]
+        if len(hot_storage) > 3:
+            opportunities.append({
+                "title": f"Storage Tier Review ({len(hot_storage)} Hot tier accounts)",
+                "description": "Evaluate if Cool or Archive tier is appropriate for infrequently accessed data",
+                "impact": "Medium",
+                "type": "savings"
+            })
+
+        # Single region deployment
+        locations = self.summary.get("resourcesByLocation", {})
+        if len(locations) == 1:
+            opportunities.append({
+                "title": "Single Region Deployment",
+                "description": "All resources in one region. Consider DR requirements vs. cost trade-offs",
+                "impact": "Low",
+                "type": "architecture"
+            })
+
+        if opportunities:
+            for opp in opportunities:
+                impact_color = {"High": "#f85149", "Medium": "#d29922", "Low": "#3fb950"}.get(opp["impact"], "#7d8590")
+                html_parts.append(f'''<div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:12px 16px;margin:12px 0;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong style="color:#c9d1d9;">{opp["title"]}</strong>
+        <span style="color:{impact_color};font-size:0.85rem;font-weight:600;">{opp["impact"]} Impact</span>
+    </div>
+    <p style="color:#7d8590;margin:8px 0 0;font-size:0.9rem;">{opp["description"]}</p>
+</div>''')
+        else:
+            html_parts.append('<p style="color:#7d8590;">No immediate cost optimisation opportunities identified. Consider Azure Advisor for detailed recommendations.</p>')
+
+        return "\n".join(html_parts)
+
+    def _section_recommendations(self) -> str:
+        """Generate recommendations roadmap section."""
+        vms = self.compute.get("virtualMachines", [])
+        key_vaults = self.security.get("keyVaults", [])
+        locations = self.summary.get("resourcesByLocation", {})
+        recommendations_data = self.security.get("recommendations", [])
+
+        immediate = []
+        short_term = []
+        strategic = []
+
+        # Build recommendations based on analysis
+        stopped_vms = [vm for vm in vms if "stopped" in (vm.get("powerState") or "").lower() or "deallocated" in (vm.get("powerState") or "").lower()]
+        if stopped_vms:
+            immediate.append("Review and clean up stopped/deallocated VMs to reduce storage costs")
+
+        if not key_vaults:
+            immediate.append("Implement Azure Key Vault for centralised secrets management")
+
+        high_severity = [r for r in recommendations_data if r.get("severity") == "High"]
+        if high_severity:
+            immediate.append(f"Address {len(high_severity)} high-severity security recommendations from Defender")
+
+        # Short-term
+        running_vms = [vm for vm in vms if "running" in (vm.get("powerState") or "").lower()]
+        if len(running_vms) >= 3:
+            short_term.append("Analyse VM utilisation and implement Reserved Instances for stable workloads")
+
+        short_term.append("Review and optimise storage account tiers based on access patterns")
+        short_term.append("Implement resource tagging strategy for cost allocation and governance")
+
+        # Strategic
+        if len(locations) == 1:
+            strategic.append("Evaluate multi-region deployment for disaster recovery")
+
+        strategic.append("Consider Azure Landing Zones for improved governance at scale")
+        strategic.append("Implement Azure Policy for compliance and resource standardisation")
+
+        html_parts = ['''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">8. Recommendations Roadmap</h2>''']
+
+        if immediate:
+            html_parts.append('''<h3 style="color:#f85149;font-size:1rem;margin:16px 0 8px;">Immediate (0-30 days)</h3>
+<ul style="margin:8px 0;padding-left:20px;color:#c9d1d9;">''')
+            for rec in immediate[:5]:
+                html_parts.append(f'<li>{rec}</li>')
+            html_parts.append('</ul>')
+
+        if short_term:
+            html_parts.append('''<h3 style="color:#d29922;font-size:1rem;margin:16px 0 8px;">Short-term (1-3 months)</h3>
+<ul style="margin:8px 0;padding-left:20px;color:#c9d1d9;">''')
+            for rec in short_term[:5]:
+                html_parts.append(f'<li>{rec}</li>')
+            html_parts.append('</ul>')
+
+        if strategic:
+            html_parts.append('''<h3 style="color:#58a6ff;font-size:1rem;margin:16px 0 8px;">Strategic (3-6 months)</h3>
+<ul style="margin:8px 0;padding-left:20px;color:#c9d1d9;">''')
+            for rec in strategic[:3]:
+                html_parts.append(f'<li>{rec}</li>')
+            html_parts.append('</ul>')
+
+        return "\n".join(html_parts)
+
+    def _section_conclusion(self) -> str:
+        """Generate conclusion section."""
+        total_resources = self.summary.get("totalResources", 0)
+        subscription_count = self.summary.get("subscriptionCount", 0)
+        vms = self.compute.get("virtualMachines", [])
+
+        # Determine overall assessment
+        stopped_vms = len([vm for vm in vms if "stopped" in (vm.get("powerState") or "").lower() or "deallocated" in (vm.get("powerState") or "").lower()])
+        key_vaults = len(self.security.get("keyVaults", []))
+        high_severity = len([r for r in self.security.get("recommendations", []) if r.get("severity") == "High"])
+
+        if high_severity > 5 or (key_vaults == 0 and len(vms) > 5):
+            posture = "requires attention"
+            posture_color = "#d29922"
+        elif stopped_vms > 5 or high_severity > 0:
+            posture = "has optimisation opportunities"
+            posture_color = "#58a6ff"
+        else:
+            posture = "is well-maintained"
+            posture_color = "#3fb950"
+
+        return f'''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">9. Conclusion</h2>
+
+<p style="color:#c9d1d9;margin-bottom:12px;">
+This Azure environment with <strong>{total_resources:,} resources</strong> across <strong>{subscription_count} subscription(s)</strong>
+<span style="color:{posture_color};font-weight:600;">{posture}</span>.
+</p>
+
+<p style="color:#c9d1d9;margin-bottom:12px;"><strong>Recommended Next Steps:</strong></p>
+<ol style="margin:8px 0;padding-left:20px;color:#c9d1d9;">
+    <li>Review the full Excel inventory for detailed resource information</li>
+    <li>Address any immediate recommendations identified above</li>
+    <li>Schedule a follow-up session to discuss cost optimisation strategies</li>
+    <li>Consider enabling Azure Defender for comprehensive security monitoring</li>
+</ol>
+
+<div style="background:linear-gradient(90deg,rgba(232,31,99,0.1),rgba(123,31,162,0.1),rgba(3,155,229,0.1));border:1px solid #30363d;border-radius:6px;padding:16px;margin-top:24px;">
+    <p style="margin:0;color:#c9d1d9;font-size:0.9rem;"><strong>Need help implementing these recommendations?</strong> Our team can assist with Azure optimisation, security hardening, and managed services.</p>
+</div>'''

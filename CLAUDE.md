@@ -343,6 +343,36 @@ See `Windows/requirements.txt` for Python packages.
 
 ## Changelog
 
+### 2026-02-10 (Azure Inventory HTML Reports)
+- **✅ Azure Inventory HTML Reports** — Hybrid reporting now implemented for Azure Resource Inventory
+  - **AzureTemplatedReport class** in `report_templates.py`:
+    - Generates instant structured HTML report (<1 second) from ARI JSON data
+    - All analysis done in pure Python (no LLM required)
+    - 9-section format: Summary Cards, Executive Summary, Subscriptions, Compute, Networking, Storage & Databases, Security, Cost Optimisation, Recommendations
+    - Visual summary cards for key metrics (Total Resources, Subscriptions, VMs, Storage, Databases, Network)
+    - VM power state analysis (running/stopped/deallocated counts)
+    - VM size categorisation (Burstable, General Purpose, Memory Optimised, etc.)
+    - Azure region display name mapping
+    - Cost optimisation opportunity detection (stopped VMs, Reserved Instance candidates, storage tier review)
+    - Security posture assessment (Key Vaults, Defender recommendations)
+    - Recommendations roadmap: Immediate / Short-term / Strategic
+  - **Updated `/azureinventory` route** in `app.py`:
+    - Always generates Python-templated HTML report first
+    - Optional LLM-enhanced analysis via checkbox (unchecked by default)
+    - New `report_html` SSE event for direct HTML rendering
+    - `report_chunk` event appends AI analysis to existing report
+  - **Updated Azure Inventory UI** in `index.html`:
+    - New "Generate AI-enhanced analysis (adds 5-10 min)" checkbox (unchecked by default)
+    - `report_html` event handler for instant structured report
+    - Updated download bar: JSON, Report HTML, Excel Inventory, Network Diagram, AI Analysis (if enabled)
+  - **Files Generated**:
+    - `azureinventory_YYYY-MM-DD_HH-MM.json` — Raw inventory data
+    - `azureinventory_report_YYYY-MM-DD_HH-MM.html` — Styled HTML report (always)
+    - `azureinventory_ai_report_YYYY-MM-DD_HH-MM.md` — AI analysis (if LLM enabled)
+    - `AzureResourceInventory_Report_*.xlsx` — Full Excel inventory (from ARI)
+    - `AzureResourceInventory_Diagram_*.xml` — Network topology (if generated)
+  - ❌ **TODO: Zero Trust** — Need to create `ZeroTrustTemplatedReport` class
+
 ### 2026-02-10 (Network Discovery HTML Reports)
 - **✅ Network Discovery HTML Reports** — Hybrid reporting now implemented for network scans
   - **NetworkTemplatedReport class** in `report_templates.py`:
@@ -352,6 +382,7 @@ See `Windows/requirements.txt` for Python packages.
     - High-risk port detection (FTP, Telnet, SNMP, SMB, RDP, NFS, etc.)
     - Automatic host categorization (Network Infrastructure, Servers, Printers, IoT, etc.)
     - Risk scoring: Critical → High → Medium → Low based on service exposure
+    - Numeric IP address sorting (fixed alphabetical sorting bug)
   - **Updated `/scan` route** in `app.py`:
     - Always generates Python-templated HTML report first
     - Optional LLM-enhanced analysis via checkbox (unchecked by default)
@@ -365,9 +396,6 @@ See `Windows/requirements.txt` for Python packages.
     - `<client>_<target>_<timestamp>.json` — Raw scan data
     - `<client>_<target>_<timestamp>_report.html` — Styled HTML report (always)
     - `<client>_<target>_<timestamp>_ai_report.md` — AI analysis (if LLM enabled)
-  - ❌ **TODO: Azure Inventory** — Need to create `AzureTemplatedReport` class
-  - ❌ **TODO: Zero Trust** — Need to create `ZeroTrustTemplatedReport` class
-  - ❌ **TODO: Windows mirror** — All changes need to be mirrored to `Windows/` folder
 
 ### 2026-02-10 (M365 HTML Report Generation)
 - **✅ M365 Assessment HTML Reports** — Converted from Markdown to styled HTML output

@@ -598,6 +598,10 @@ body {
             <input type="checkbox" id="ariSkipDiagram" />
             Skip network diagram generation
         </label>
+        <label class="checkbox-label" style="margin-left: 20px;">
+            <input type="checkbox" id="ariUseLlm" />
+            Generate AI-enhanced analysis (adds 5-10 min)
+        </label>
     </div>
     <p style="color:#7d8590; font-size:0.8rem; margin-top:10px; text-align:center;">
         Requires PowerShell 7 and will prompt for Azure authentication (Reader access to subscriptions)
@@ -623,14 +627,14 @@ body {
         </div>
     </div>
 
-    <!-- right: AI report -->
+    <!-- right: report -->
     <div class="panel">
         <div class="panel-head">
             <div class="dot" id="ariReportDot"></div>
-            <span>Infrastructure Analysis</span>
+            <span>Infrastructure Report</span>
         </div>
         <div id="ariReportPanel" class="report-panel">
-            <p class="placeholder">The infrastructure analysis will appear here once the inventory is complete.</p>
+            <p class="placeholder">The infrastructure report will appear here once the inventory is complete.</p>
         </div>
         <div class="dl-bar" id="ariDlBar"></div>
     </div>
@@ -1054,13 +1058,14 @@ function startAriAssessment() {
     // Get options
     const includeSecurityCenter = document.getElementById('ariSecurityCenter').checked;
     const skipDiagram = document.getElementById('ariSkipDiagram').checked;
+    const useLlm = document.getElementById('ariUseLlm').checked;
 
     // reset UI
     ariReportAccum = '';
     document.getElementById('ariAssessBtn').disabled = true;
     document.getElementById('ariStopBtn').classList.add('show');
     document.getElementById('ariLogPanel').innerHTML = '';
-    document.getElementById('ariReportPanel').innerHTML = '<p class="placeholder">Waiting for analysis...</p>';
+    document.getElementById('ariReportPanel').innerHTML = '<p class="placeholder">Waiting for report...</p>';
     document.getElementById('ariDlBar').classList.remove('show');
     document.getElementById('ariDlBar').innerHTML = '';
     ariDot('ariLogDot', 'active');
@@ -1070,7 +1075,8 @@ function startAriAssessment() {
     const url = '/azureinventory?client=' + encodeURIComponent(client) +
                 '&session=' + encodeURIComponent(ariSessionId) +
                 '&securityCenter=' + includeSecurityCenter +
-                '&skipDiagram=' + skipDiagram;
+                '&skipDiagram=' + skipDiagram +
+                '&useLlm=' + useLlm;
 
     ariEs = new EventSource(url);
 
@@ -1082,10 +1088,28 @@ function startAriAssessment() {
         ariAppendLog('[*] ' + e.data, 'warn');
     });
 
-    // streamed LLM report
+    // Python-templated HTML report (instant)
+    ariEs.addEventListener('report_html', e => {
+        const rp = document.getElementById('ariReportPanel');
+        rp.innerHTML = e.data;
+        rp.scrollTop = 0;
+        ariDot('ariReportDot', 'active');
+    });
+
+    // streamed LLM report (appended after HTML report)
     ariEs.addEventListener('report_chunk', e => {
         ariReportAccum += e.data;
         ariDot('ariReportDot', 'active');
+
+        // Append AI analysis section to existing report
+        const rp = document.getElementById('ariReportPanel');
+        let aiSection = rp.querySelector('.ai-analysis-section');
+        if (!aiSection) {
+            aiSection = document.createElement('div');
+            aiSection.className = 'ai-analysis-section';
+            aiSection.innerHTML = '<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">AI-Enhanced Analysis</h2>';
+            rp.appendChild(aiSection);
+        }
 
         let html = marked.parse(ariReportAccum);
         html = html.replace(/\[!\]/g, '<span class="flag">[!]</span>');
@@ -1094,8 +1118,7 @@ function startAriAssessment() {
         html = html.replace(/<strong>(Medium[^<]*)<\/strong>/gi, '<span class="sev-medium">$1</span>');
         html = html.replace(/<strong>(Low[^<]*)<\/strong>/gi, '<span class="sev-low">$1</span>');
 
-        const rp = document.getElementById('ariReportPanel');
-        rp.innerHTML = html;
+        aiSection.innerHTML = '<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">AI-Enhanced Analysis</h2>' + html;
         rp.scrollTop = rp.scrollHeight;
     });
 
@@ -1104,12 +1127,15 @@ function startAriAssessment() {
         const f = JSON.parse(e.data);
         const bar = document.getElementById('ariDlBar');
         let btns = `<a href="/download/${f.json}" class="dl-btn" download>JSON</a>`;
-        btns += `<a href="/download/${f.md}" class="dl-btn" download>Markdown</a>`;
+        btns += `<a href="/download/${f.html}" class="dl-btn" download>Report HTML</a>`;
         if (f.excel) {
-            btns += `<a href="/download/${f.excel}" class="dl-btn zt-html" download>Excel Report</a>`;
+            btns += `<a href="/download/${f.excel}" class="dl-btn zt-html" download>Excel Inventory</a>`;
         }
         if (f.diagram) {
             btns += `<a href="/download/${f.diagram}" class="dl-btn" download>Network Diagram</a>`;
+        }
+        if (f.llm_report) {
+            btns += `<a href="/download/${f.llm_report}" class="dl-btn" download>AI Analysis</a>`;
         }
         bar.innerHTML = btns;
         bar.classList.add('show');
