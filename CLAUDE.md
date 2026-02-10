@@ -35,6 +35,7 @@ Both Mac and Windows versions share identical functionality. The table below sho
 | `scan.py` | Network scanning engine — nmap wrapper, XML parser, LLM prompts |
 | `app.py` | Flask web server — SSE streaming, routes for all assessments |
 | `templates/index.html` | Single-page UI with tabbed interface |
+| `report_templates.py` | Python-templated report generators (instant structured reports) |
 | `m365assessment.ps1` | PowerShell script for M365 data collection via Graph API + Maester |
 | `zerotrust.ps1` | PowerShell script for Zero Trust data collection via Microsoft Graph |
 | `azureinventory.ps1` | PowerShell script for Azure Resource Inventory via ARI module |
@@ -116,12 +117,29 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
    - Runs comprehensive M365 security tests across all connected services
    - Generates interactive HTML report
    - Exports detailed JSON and Markdown results
-6. AI (Ollama) analyses all data INCLUDING the Maester markdown report
-7. Report focuses on MSP value: project opportunities, license upsells, managed services
+6. **Python template engine** generates instant structured report (<1 second)
+7. **Optional:** AI (Ollama) generates enhanced executive summary if checkbox enabled
+8. Report focuses on MSP value: project opportunities, license upsells, managed services
+
+### Report Generation (Hybrid Approach)
+
+- **Structured Report (default):** Python-templated report with tables, risk scores, and recommendations
+  - Generated instantly (<1 second)
+  - All risk assessment in pure Python (no LLM hallucinations)
+  - 8-section format: Executive Summary, Licensing, Identity & Access, Secure Score, User Health, Intune, Recommendations, Conclusion
+  - No Ollama dependency required
+  - Perfect for batch processing and technical analysis
+
+- **AI-Enhanced Summary (optional):** Natural language executive summary via LLM
+  - Checkbox: "Generate AI-enhanced summary (adds 2-3 min)"
+  - Unchecked by default
+  - Adds business-focused narrative for client presentations
+  - Requires Ollama with qwen2.5:14b model
 
 ### Options
 - **Skip Maester Tests** — Skips Maester security tests (unchecked by default, Maester runs)
 - **Update Maester Tests** — Forces refresh of cached Maester test files (unchecked by default)
+- **Generate AI-enhanced summary** — Adds LLM-generated executive summary (unchecked by default)
 
 ### Maester Test Caching
 - **Test files are cached** in a shared `MaesterTests/` folder to speed up assessments
@@ -131,16 +149,18 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
 - **Manual refresh** available via "Update Maester Tests" checkbox when needed
 
 ### Duration
-- **With cached tests** (typical):
+- **Data collection** (PowerShell + Graph API):
   - Small tenants (<100 users): 5-9 minutes
   - Medium tenants (100-1000 users): 9-15 minutes
   - Large tenants (1000+ users): 15-22 minutes
-- **With test update** (first run or manual refresh):
-  - Add 2-3 minutes to above times for test file download
+- **Report generation:**
+  - Structured report: <1 second (always generated)
+  - AI summary: +2-3 min for small, +5-7 for medium, +8-12 for large (optional)
 
 ### Files Generated
 - `m365assessment_YYYY-MM-DD_HH-MM.json` — Raw Graph API assessment data
-- `m365assessment_report_YYYY-MM-DD_HH-MM.md` — AI-generated summary report
+- `m365assessment_structured_YYYY-MM-DD_HH-MM.md` — Python-templated structured report (always)
+- `m365assessment_report_YYYY-MM-DD_HH-MM.md` — AI-generated summary (if LLM enabled)
 - `MaesterTests/MaesterReport.html` — Interactive Maester security test report
 - `MaesterTests/MaesterReport.json` — Raw Maester test results
 - `MaesterTests/MaesterReport.md` — Markdown report (used by AI for analysis)
@@ -322,6 +342,31 @@ See `Windows/requirements.txt` for Python packages.
 ---
 
 ## Changelog
+
+### 2026-02-10 (IN PROGRESS - Hybrid Reporting)
+- **🚧 INCOMPLETE: Hybrid reporting implementation** — Python templates + optional LLM (feature branch: `feature/hybrid-reporting`)
+  - ✅ **M365 Assessment implemented** (macOS only):
+    - New `report_templates.py` module with `M365TemplatedReport` class
+    - Pure Python report generation (<1 second, no Ollama required)
+    - All risk assessment logic in Python with clear thresholds
+    - 8-section structured markdown report
+    - Optional LLM checkbox for AI-enhanced summary
+    - Saves both `_structured_` and `_report_` files
+  - ❌ **TODO: Network Discovery** — Need to create `NetworkTemplatedReport` class
+  - ❌ **TODO: Azure Inventory** — Need to create `AzureTemplatedReport` class
+  - ❌ **TODO: Zero Trust** — Need to create `ZeroTrustTemplatedReport` class
+  - ❌ **TODO: Windows mirror** — All changes need to be mirrored to `Windows/` folder
+  - 📝 **Implementation guide:** See `/Users/leonbarker/.claude/plans/snappy-booping-hammock.md`
+
+**NEXT STEPS FOR CONTINUATION:**
+1. Open plan file: `cat /Users/leonbarker/.claude/plans/snappy-booping-hammock.md`
+2. Implement `NetworkTemplatedReport` class in `report_templates.py`
+3. Modify Network Discovery route in `app.py` (lines 61-245)
+4. Add UI checkbox to Network tab in `index.html`
+5. Repeat for Azure Inventory and Zero Trust
+6. Mirror all changes from `Mac/` to `Windows/`
+7. Test each assessment end-to-end
+8. Update this changelog with completion status
 
 ### 2026-02-09 (Update 6)
 - **Added Maester test caching** — Significantly faster M365 assessments through intelligent test file caching
