@@ -780,6 +780,7 @@ def m365assessment():
     session_id = request.args.get("session", "").strip()
     skip_maester = request.args.get("skipMaester", "").lower() == "true"
     update_maester_tests = request.args.get("updateMaesterTests", "").lower() == "true"
+    use_llm = request.args.get("useLlm", "").lower() == "true"
 
     if not client or not _CLIENT_RE.match(client):
         return Response(sse("Invalid or missing client name.", event="m365_error"),
@@ -910,7 +911,6 @@ def m365assessment():
                 except Exception as e:
                     yield sse(f"[!] Could not read Maester report: {e}", event="status")
 
-            # Generate AI analysis
             import time
 
             # Calculate tenant size for logging
@@ -918,57 +918,89 @@ def m365assessment():
             tenant_size = "small" if total_users < 100 else "medium" if total_users < 1000 else "large"
 
             yield sse(f"[*] Tenant size: {total_users} users ({tenant_size})", event="status")
-            yield sse(f"[*] Generating AI analysis report...", event="status")
-            yield sse(f"[*] This may take 2-3 minutes for small tenants, 5-7 for medium, 8-12 for large", event="status")
-            yield sse("")
 
-            prompt = _m365assessment_prompt(assessment_data, maester_md_content)
-            prompt_size = len(prompt)
-            yield sse(f"[*] Prompt size: {prompt_size:,} characters (~{prompt_size//4:,} tokens)", event="status")
-
-            report_text = ""
-            start_time = time.time()
-            last_progress_time = start_time
-            token_count = 0
+            # ALWAYS generate Python-templated structured report (instant)
+            yield sse(f"[*] Generating structured report...", event="status")
 
             try:
-                for chunk in ollama.generate(model="qwen2.5:14b",
-                                             prompt=prompt,
-                                             stream=True):
-                    tok = chunk.get("response", "")
-                    if tok:
-                        report_text += tok
-                        token_count += 1
-                        yield sse(tok, event="report_chunk")
+                from report_templates import M365TemplatedReport
+                template_report = M365TemplatedReport(assessment_data)
+                structured_report = template_report.generate()
 
-                        # Progress indicator every 10 seconds
-                        current_time = time.time()
-                        if current_time - last_progress_time >= 10:
-                            elapsed = int(current_time - start_time)
-                            yield sse(f"[*] Still generating... ({elapsed}s elapsed, {token_count} tokens)", event="status")
-                            last_progress_time = current_time
+                # Save structured report
+                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+                structured_file = f"m365assessment_structured_{timestamp}.md"
+                structured_path = os.path.join(client_folder, structured_file)
+                with open(structured_path, "w") as f:
+                    f.write(structured_report)
 
-                # Final timing
-                elapsed_total = int(time.time() - start_time)
-                yield sse(f"[+] Report generated in {elapsed_total}s ({token_count} tokens, {token_count/elapsed_total:.1f} tok/s)", event="status")
+                yield sse(f"[✓] Structured report generated: {structured_file}", event="status")
+                yield sse("")
+
+                # Stream structured report to UI
+                for line in structured_report.split('\n'):
+                    yield sse(line, event="report_chunk")
 
             except Exception as exc:
-                yield sse(f"Ollama error: {exc}", event="m365_error")
-                yield sse("Ensure ollama is running and 'qwen2.5:14b' model is available.", event="m365_error")
-                return
+                yield sse(f"[!] Error generating structured report: {exc}", event="m365_error")
+                # Continue even if structured report fails
 
-            # Save the markdown report
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-            md_file = f"m365assessment_report_{timestamp}.md"
-            md_path = os.path.join(client_folder, md_file)
-            with open(md_path, "w") as f:
-                f.write(report_text)
+            # Optional: LLM-enhanced executive summary
+            llm_file = None
+            if use_llm:
+                yield sse("\n\n---\n\n# AI-Enhanced Executive Summary\n\n", event="report_chunk")
+                yield sse(f"[*] Generating AI-enhanced executive summary...", event="status")
+                yield sse(f"[*] This may take 2-3 minutes for small tenants, 5-7 for medium, 8-12 for large", event="status")
+                yield sse("")
+
+                prompt = _m365assessment_prompt(assessment_data, maester_md_content)
+                prompt_size = len(prompt)
+                yield sse(f"[*] Prompt size: {prompt_size:,} characters (~{prompt_size//4:,} tokens)", event="status")
+
+                report_text = ""
+                start_time = time.time()
+                last_progress_time = start_time
+                token_count = 0
+
+                try:
+                    for chunk in ollama.generate(model="qwen2.5:14b",
+                                                 prompt=prompt,
+                                                 stream=True):
+                        tok = chunk.get("response", "")
+                        if tok:
+                            report_text += tok
+                            token_count += 1
+                            yield sse(tok, event="report_chunk")
+
+                            # Progress indicator every 10 seconds
+                            current_time = time.time()
+                            if current_time - last_progress_time >= 10:
+                                elapsed = int(current_time - start_time)
+                                yield sse(f"[*] Still generating... ({elapsed}s elapsed, {token_count} tokens)", event="status")
+                                last_progress_time = current_time
+
+                    # Final timing
+                    elapsed_total = int(time.time() - start_time)
+                    yield sse(f"[+] AI summary generated in {elapsed_total}s ({token_count} tokens, {token_count/elapsed_total:.1f} tok/s)", event="status")
+
+                    # Save the LLM report
+                    llm_file = f"m365assessment_report_{timestamp}.md"
+                    llm_path = os.path.join(client_folder, llm_file)
+                    with open(llm_path, "w") as f:
+                        f.write(report_text)
+
+                except Exception as exc:
+                    yield sse(f"Ollama error: {exc}", event="m365_error")
+                    yield sse("Ensure ollama is running and 'qwen2.5:14b' model is available.", event="m365_error")
+                    yield sse("Note: Structured report was already generated successfully.", event="status")
 
             # Notify browser of files
             files_data = {
                 "json": json_file,
-                "md": f"{client}/{md_file}",
+                "structured_report": f"{client}/{structured_file}",
             }
+            if use_llm and llm_file:
+                files_data["llm_report"] = f"{client}/{llm_file}"
             if maester_html_file:
                 files_data["maesterHtml"] = maester_html_file
             if maester_json_file:
