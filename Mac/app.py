@@ -937,13 +937,8 @@ def m365assessment():
                 yield sse(f"[✓] Structured report generated: {structured_file}", event="status")
                 yield sse("")
 
-                # Stream structured report to UI in larger chunks for proper markdown rendering
-                # Split by sections (## headers) instead of lines to preserve markdown structure
-                import re
-                sections = re.split(r'(?=^## )', structured_report, flags=re.MULTILINE)
-                for section in sections:
-                    if section.strip():
-                        yield sse(section, event="report_chunk")
+                # Send complete structured report to UI for proper markdown rendering
+                yield sse(structured_report, event="report_chunk")
 
             except Exception as exc:
                 yield sse(f"[!] Error generating structured report: {exc}", event="m365_error")
