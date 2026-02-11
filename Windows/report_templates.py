@@ -468,19 +468,19 @@ class M365TemplatedReport(ReportSection):
 
         # Gap analysis
         if pct >= 80 and enforcement_method in ["Security Defaults", "Conditional Access (all users)"]:
-            gap_icon = "✅"
+            gap_icon = "[OK]"
             gap_status = "Good - High registration + strong enforcement"
             gap_color = "#3fb950"
         elif pct >= 80 and enforcement_method == "Conditional Access (partial)":
-            gap_icon = "⚠️"
+            gap_icon = "[!]"
             gap_status = "Medium - Users ready but enforcement incomplete"
             gap_color = "#d29922"
         elif pct < 80 and enforcement_method in ["Security Defaults", "Conditional Access (all users)"]:
-            gap_icon = "⚠️"
+            gap_icon = "[!]"
             gap_status = "Medium - Strong enforcement will prompt registration at next sign-in"
             gap_color = "#d29922"
         else:
-            gap_icon = "❌"
+            gap_icon = "[X]"
             gap_status = "Critical Gap - Low registration and weak enforcement"
             gap_color = "#f85149"
 
@@ -511,7 +511,7 @@ class M365TemplatedReport(ReportSection):
         if not ca_policies:
             return '''<h3 style="color:#bc8cff;font-size:1rem;margin:20px 0 12px;">Conditional Access</h3>
 <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px 20px;margin-bottom:16px;">
-    <p style="color:#f85149;"><strong>⚠️ No Conditional Access policies found.</strong></p>
+    <p style="color:#f85149;"><strong>[!] No Conditional Access policies found.</strong></p>
     <p style="color:#7d8590;font-size:0.9rem;margin-top:8px;">Conditional Access is essential for Zero Trust security. Consider implementing policies for MFA enforcement, device compliance, and location-based access.</p>
 </div>'''
 
@@ -586,16 +586,16 @@ class M365TemplatedReport(ReportSection):
         # Score gauge color
         if pct >= 80:
             gauge_color = "#3fb950"
-            assessment = "✅ Excellent security posture"
+            assessment = "[OK] Excellent security posture"
         elif pct >= 60:
             gauge_color = "#039be5"
-            assessment = "✅ Good security posture, room for improvement"
+            assessment = "[OK] Good security posture, room for improvement"
         elif pct >= 40:
             gauge_color = "#d29922"
-            assessment = "⚠️ Below average security posture, prioritize improvements"
+            assessment = "[!] Below average security posture, prioritize improvements"
         else:
             gauge_color = "#f85149"
-            assessment = "❌ Poor security posture, immediate action required"
+            assessment = "[X] Poor security posture, immediate action required"
 
         recommendations = security_score.get("recommendations", [])[:10]
         rec_html = ""
@@ -895,7 +895,7 @@ class M365TemplatedReport(ReportSection):
 
         if short_term:
             items_html = "".join([f'<li style="color:#c9d1d9;line-height:1.8;margin-bottom:8px;">{item}</li>' for item in short_term])
-            sections.append(f'''<h3 style="color:#d29922;font-size:1rem;margin:16px 0 12px;">⚠️ Short-term Improvements (1-3 months)</h3>
+            sections.append(f'''<h3 style="color:#d29922;font-size:1rem;margin:16px 0 12px;">[!] Short-term Improvements (1-3 months)</h3>
 <ul style="margin:0 0 16px 24px;padding:0;">{items_html}</ul>''')
 
         if strategic:
@@ -2204,7 +2204,7 @@ This assessment covers <strong>{env_desc}</strong> with <strong>{total_resources
             html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">Key Vaults ({len(key_vaults)})</h3>
 {kv_table}''')
         else:
-            html_parts.append('''<p style="color:#d29922;margin:12px 0;">⚠️ <strong>No Key Vaults detected</strong> — consider implementing centralised secrets management</p>''')
+            html_parts.append('''<p style="color:#d29922;margin:12px 0;">[!] <strong>No Key Vaults detected</strong> — consider implementing centralised secrets management</p>''')
 
         # Security Center recommendations
         if recommendations:
@@ -2766,9 +2766,9 @@ class ZeroTrustTemplatedReport(ReportSection):
 </p>''')
 
         if global_admins == 1:
-            html_parts.append('<p style="color:#d29922;font-size:0.9rem;">⚠️ Single admin account is a business continuity risk. Create a break-glass emergency access account.</p>')
+            html_parts.append('<p style="color:#d29922;font-size:0.9rem;">[!] Single admin account is a business continuity risk. Create a break-glass emergency access account.</p>')
         elif global_admins > 5:
-            html_parts.append(f'<p style="color:#f85149;font-size:0.9rem;">⚠️ {global_admins} Global Admins is excessive. Review for least privilege and consider PIM.</p>')
+            html_parts.append(f'<p style="color:#f85149;font-size:0.9rem;">[!] {global_admins} Global Admins is excessive. Review for least privilege and consider PIM.</p>')
 
         return "\n".join(html_parts)
 
@@ -2785,7 +2785,7 @@ class ZeroTrustTemplatedReport(ReportSection):
         html_parts = ['''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">4. Device & Endpoint Analysis</h2>''']
 
         if total_devices == 0:
-            html_parts.append('''<p style="color:#d29922;margin:12px 0;">⚠️ <strong>No managed devices detected.</strong> This may indicate:</p>
+            html_parts.append('''<p style="color:#d29922;margin:12px 0;">[!] <strong>No managed devices detected.</strong> This may indicate:</p>
 <ul style="margin:8px 0;padding-left:20px;color:#c9d1d9;">
     <li>Intune/MDM is not deployed</li>
     <li>Devices are managed by a third-party MDM</li>
@@ -2808,12 +2808,12 @@ class ZeroTrustTemplatedReport(ReportSection):
             rows = [[p.get("displayName", "Unknown")] for p in compliance_policies[:10]]
             html_parts.append(self.format_table(["Policy Name"], rows))
         else:
-            html_parts.append('<p style="color:#d29922;font-size:0.9rem;">⚠️ No device compliance policies detected. Devices cannot be evaluated for compliance.</p>')
+            html_parts.append('<p style="color:#d29922;font-size:0.9rem;">[!] No device compliance policies detected. Devices cannot be evaluated for compliance.</p>')
 
         # App protection policies
         html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">App Protection Policies ({len(app_protection)})</h3>''')
         if not app_protection:
-            html_parts.append('<p style="color:#d29922;font-size:0.9rem;">⚠️ No app protection policies detected. Consider implementing MAM for BYOD scenarios.</p>')
+            html_parts.append('<p style="color:#d29922;font-size:0.9rem;">[!] No app protection policies detected. Consider implementing MAM for BYOD scenarios.</p>')
 
         return "\n".join(html_parts)
 
@@ -2821,7 +2821,7 @@ class ZeroTrustTemplatedReport(ReportSection):
         """Generate critical findings from failed tests."""
         if not self.failed_tests:
             return f'''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">5. Critical Findings</h2>
-<p style="color:#3fb950;margin:12px 0;">✓ No critical security test failures detected.</p>'''
+<p style="color:#3fb950;margin:12px 0;">[OK] No critical security test failures detected.</p>'''
 
         html_parts = [f'''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">5. Critical Findings ({len(self.failed_tests)} failed tests)</h2>''']
 
