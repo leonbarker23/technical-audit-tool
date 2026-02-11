@@ -342,7 +342,7 @@ def zerotrust():
 
             # Load the assessment data
             yield sse("Parsing assessment data…", event="status")
-            with open(os.path.join(BASE_DIR, json_file), "r") as f:
+            with open(os.path.join(BASE_DIR, json_file), "r", encoding="utf-8") as f:
                 assessment_data = json.load(f)
 
             # Load detailed ZT assessment data if available (from Microsoft module)
@@ -521,7 +521,7 @@ def azureinventory():
 
             # Load the inventory data
             yield sse("Parsing inventory data...", event="status")
-            with open(os.path.join(BASE_DIR, json_file), "r") as f:
+            with open(os.path.join(BASE_DIR, json_file), "r", encoding="utf-8") as f:
                 inventory_data = json.load(f)
 
             # ── Generate Python-templated HTML report (instant) ──
@@ -696,7 +696,7 @@ def m365assessment():
 
             # Load the assessment data
             yield sse("Parsing assessment data...", event="status")
-            with open(os.path.join(BASE_DIR, json_file), "r") as f:
+            with open(os.path.join(BASE_DIR, json_file), "r", encoding="utf-8") as f:
                 assessment_data = json.load(f)
 
             # Generate Python-templated structured report (instant, HTML)
