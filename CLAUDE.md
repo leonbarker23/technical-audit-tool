@@ -10,16 +10,16 @@ A comprehensive assessment suite for MSP technical consultants performing IT aud
 
 | Tab | Status | Description |
 |-----|--------|-------------|
-| **Network Discovery** | ✅ Complete | Network vulnerability scanning with nmap, instant HTML reports, optional AI analysis |
-| **M365 Assessment** | ✅ Complete | Microsoft 365 tenant assessment with Maester tests, instant HTML reports, optional AI summary |
-| **Azure Inventory (ARI)** | ✅ Complete | Azure Resource Inventory with Excel reports, instant HTML summary, optional AI analysis |
-| **Zero Trust Assessment** | ✅ Complete | Microsoft 365 Zero Trust assessment with instant HTML summary, optional AI analysis |
+| **Network Discovery** | ✅ Complete | Network vulnerability scanning with nmap, instant HTML reports |
+| **M365 Assessment** | ✅ Complete | Microsoft 365 tenant assessment with Maester tests, instant HTML reports |
+| **Azure Inventory (ARI)** | ✅ Complete | Azure Resource Inventory with Excel reports, instant HTML summary |
+| **Zero Trust Assessment** | ✅ Complete | Microsoft 365 Zero Trust assessment with instant HTML summary |
 
-### Hybrid Reporting (All Tabs)
-All assessment tabs now use a **hybrid reporting approach**:
-- **Instant HTML Report** — Python-templated, generates in <1 second, no LLM required
-- **Optional AI Analysis** — Checkbox to enable LLM-enhanced narrative (adds 2-10 min depending on data size)
-- **Consistent Output** — Deterministic reports with risk scoring, tables, and recommendations
+### HTML Reports (All Tabs)
+All assessment tabs generate **instant Python-templated HTML reports**:
+- **Fast Generation** — Reports generate in <1 second
+- **Deterministic Output** — Consistent risk scoring, tables, and recommendations
+- **No External Dependencies** — Pure Python template engine, no LLM required
 
 ---
 
@@ -38,14 +38,14 @@ Both Mac and Windows versions share identical functionality. The table below sho
 
 | File | Role |
 |------|------|
-| `scan.py` | Network scanning engine — nmap wrapper, XML parser, LLM prompts |
+| `scan.py` | Network scanning engine — nmap wrapper, XML parser |
 | `app.py` | Flask web server — SSE streaming, routes for all assessments |
 | `templates/index.html` | Single-page UI with tabbed interface |
 | `report_templates.py` | Python-templated report generators (instant structured reports) |
 | `m365assessment.ps1` | PowerShell script for M365 data collection via Graph API + Maester |
 | `zerotrust.ps1` | PowerShell script for Zero Trust data collection via Microsoft Graph |
 | `azureinventory.ps1` | PowerShell script for Azure Resource Inventory via ARI module |
-| `requirements.txt` | Python dependencies (`flask`, `ollama`) |
+| `requirements.txt` | Python dependencies (`flask`) |
 
 ---
 
@@ -66,8 +66,7 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
 2. nmap runs as subprocess, output streamed via SSE
 3. XML parsed into structured data
 4. Python generates instant HTML report (`NetworkTemplatedReport`)
-5. Optional: AI (Ollama) generates enhanced analysis
-6. Files saved to client folder
+5. Files saved to client folder
 
 ### Scan Depth Profiles
 
@@ -86,8 +85,7 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
 
 ### Files Generated
 - `<client>_<target>_<timestamp>.json` — Raw scan data
-- `<client>_<target>_<timestamp>_report.html` — Styled HTML report (always)
-- `<client>_<target>_<timestamp>_ai_report.md` — AI analysis (if enabled)
+- `<client>_<target>_<timestamp>_report.html` — Styled HTML report
 
 ---
 
@@ -133,28 +131,19 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
    - Generates interactive HTML report
    - Exports detailed JSON and Markdown results
 6. **Python template engine** generates instant structured report (<1 second)
-7. **Optional:** AI (Ollama) generates enhanced executive summary if checkbox enabled
-8. Report focuses on MSP value: project opportunities, license upsells, managed services
+7. Report focuses on MSP value: project opportunities, license upsells, managed services
 
-### Report Generation (Hybrid Approach)
+### Report Generation
 
-- **Structured Report (default):** Python-templated report with tables, risk scores, and recommendations
-  - Generated instantly (<1 second)
-  - All risk assessment in pure Python (no LLM hallucinations)
-  - 8-section format: Executive Summary, Licensing, Identity & Access, Secure Score, User Health, Intune, Recommendations, Conclusion
-  - No Ollama dependency required
-  - Perfect for batch processing and technical analysis
-
-- **AI-Enhanced Summary (optional):** Natural language executive summary via LLM
-  - Checkbox: "Generate AI-enhanced summary (adds 2-3 min)"
-  - Unchecked by default
-  - Adds business-focused narrative for client presentations
-  - Requires Ollama with qwen2.5:14b model
+Python-templated report with tables, risk scores, and recommendations:
+- Generated instantly (<1 second)
+- All risk assessment in pure Python
+- 8-section format: Executive Summary, Licensing, Identity & Access, Secure Score, User Health, Intune, Recommendations, Conclusion
+- Perfect for batch processing and technical analysis
 
 ### Options
 - **Skip Maester Tests** — Skips Maester security tests (unchecked by default, Maester runs)
 - **Update Maester Tests** — Forces refresh of cached Maester test files (unchecked by default)
-- **Generate AI-enhanced summary** — Adds LLM-generated executive summary (unchecked by default)
 
 ### Maester Test Caching
 - **Test files are cached** in a shared `MaesterTests/` folder to speed up assessments
@@ -168,17 +157,14 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
   - Small tenants (<100 users): 5-9 minutes
   - Medium tenants (100-1000 users): 9-15 minutes
   - Large tenants (1000+ users): 15-22 minutes
-- **Report generation:**
-  - Structured report: <1 second (always generated)
-  - AI summary: +2-3 min for small, +5-7 for medium, +8-12 for large (optional)
+- **Report generation:** <1 second
 
 ### Files Generated
 - `m365assessment_YYYY-MM-DD_HH-MM.json` — Raw Graph API assessment data
-- `m365assessment_structured_YYYY-MM-DD_HH-MM.html` — Python-templated HTML report (always)
-- `m365assessment_report_YYYY-MM-DD_HH-MM.md` — AI-generated summary (if LLM enabled)
+- `m365assessment_structured_YYYY-MM-DD_HH-MM.html` — Python-templated HTML report
 - `MaesterTests/MaesterReport.html` — Interactive Maester security test report
 - `MaesterTests/MaesterReport.json` — Raw Maester test results
-- `MaesterTests/MaesterReport.md` — Markdown report (used by AI for analysis)
+- `MaesterTests/MaesterReport.md` — Markdown report
 
 ---
 
@@ -202,12 +188,10 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
    - Optionally generates network topology diagram (Draw.io XML)
 5. PowerShell extracts summary data from Excel to JSON
 6. Python generates instant HTML report (`AzureTemplatedReport`)
-7. Optional: AI (Ollama) generates enhanced analysis
 
 ### Options
 - **Include Security Center** — Adds Azure Defender recommendations
 - **Skip Diagram** — Skips network topology generation (faster)
-- **Generate AI-enhanced analysis** — Adds LLM narrative (unchecked by default)
 
 ### Report Sections (HTML)
 1. **Summary Cards** — Total Resources, Subscriptions, VMs, Storage, Databases, Network
@@ -227,8 +211,7 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
 
 ### Files Generated
 - `azureinventory_YYYY-MM-DD_HH-MM.json` — Summary data
-- `azureinventory_report_YYYY-MM-DD_HH-MM.html` — Styled HTML report (always)
-- `azureinventory_ai_report_YYYY-MM-DD_HH-MM.md` — AI analysis (if enabled)
+- `azureinventory_report_YYYY-MM-DD_HH-MM.html` — Styled HTML report
 - `AzureResourceInventory_Report_*.xlsx` — Full Excel inventory
 - `AzureResourceInventory_Diagram_*.xml` — Network topology (Draw.io)
 
@@ -267,7 +250,6 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
    - Generates interactive HTML report with charts
    - Exports detailed JSON with all test results
 6. Python generates instant HTML summary (`ZeroTrustTemplatedReport`)
-7. Optional: AI (Ollama) generates enhanced analysis
 
 ### Report Sections (HTML Summary)
 1. **Summary Cards** — Maturity Level, Tests passed/failed, CA Policies, Global Admins, Managed Devices, Secure Score
@@ -292,21 +274,9 @@ Assessments can run in parallel — you can run a Zero Trust assessment while al
 
 ### Files Generated
 - `zerotrust_YYYY-MM-DD_HH-MM.json` — Raw Graph API data
-- `zerotrust_summary_YYYY-MM-DD_HH-MM.html` — Styled summary report (always)
-- `zerotrust_ai_report_YYYY-MM-DD_HH-MM.md` — AI analysis (if enabled)
+- `zerotrust_summary_YYYY-MM-DD_HH-MM.html` — Styled summary report
 - `ZeroTrustReport/ZeroTrustAssessmentReport.html` — Microsoft interactive HTML report
 - `ZeroTrustReport/zt-export/ZeroTrustAssessmentReport.json` — Detailed test results
-
----
-
-## LLM Integration (Optional)
-
-All tabs now generate instant Python-templated HTML reports **without requiring an LLM**. AI-enhanced analysis is available as an optional checkbox on each tab.
-
-- **Model:** `qwen2.5:14b` on macOS, `qwen2.5:7b` on Windows (via Ollama)
-- **Streaming:** Token-by-token via SSE for real-time rendering
-- **Prompt design:** Strict output templates with anti-hallucination instructions
-- **When to use:** For business narratives, pattern recognition, and client-facing summaries
 
 ---
 
@@ -324,8 +294,8 @@ All tabs now generate instant Python-templated HTML reports **without requiring 
 
 - Dark theme with AAG gradient branding
 - Tabbed interface with 4 assessment types
-- Two-panel layout: live log (left) + AI report (right)
-- Real-time Markdown rendering with severity colour-coding
+- Two-panel layout: live log (left) + report (right)
+- Real-time HTML report rendering
 - Download bar with links to generated files
 
 ---
@@ -347,15 +317,6 @@ brew install mono-libgdiplus
 | `powershell` | PowerShell 7 for Azure Inventory, M365 Assessment, and Zero Trust scripts |
 | `mono-libgdiplus` | GDI+ library for Excel column auto-sizing in ImportExcel module |
 
-#### Ollama (AI)
-```bash
-# Install Ollama
-curl -fsSL https://ollama.com/install.sh | sh
-
-# Pull the model
-ollama pull qwen2.5:14b
-```
-
 #### Python Dependencies
 ```bash
 cd Mac
@@ -363,7 +324,7 @@ python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 ```
 
-See `Mac/requirements.txt` for Python packages (`flask`, `ollama`).
+See `Mac/requirements.txt` for Python packages (`flask`).
 
 ### Windows
 
@@ -372,10 +333,8 @@ See `Mac/requirements.txt` for Python packages (`flask`, `ollama`).
 | Dependency | Installation Method |
 |------------|---------------------|
 | Python 3 | winget or direct download from python.org |
-| pip packages | `pip install flask ollama` |
+| pip packages | `pip install flask` |
 | nmap | winget (`Insecure.Nmap`) |
-| Ollama | Direct download of OllamaSetup.exe |
-| qwen2.5:7b model | `ollama pull qwen2.5:7b` |
 | PowerShell 7 | winget (`Microsoft.PowerShell`) |
 
 See `Windows/requirements.txt` for Python packages.
@@ -384,12 +343,20 @@ See `Windows/requirements.txt` for Python packages.
 
 ## Known Limitations
 
-- `qwen2.5:14b` needs ~10 GB RAM; Windows uses smaller `qwen2.5:7b`
 - Network scans are unauthenticated discovery only
 
 ---
 
 ## Changelog
+
+### 2026-02-11 (LLM Integration Removed)
+- **Removed Ollama/LLM integration** — All reports now use pure Python templating
+  - Removed `import ollama` and all LLM-related code from `app.py` (both platforms)
+  - Removed AI checkboxes from all 4 tabs in `index.html` (both platforms)
+  - Removed `ollama` from `requirements.txt` (both platforms)
+  - Removed Ollama installation section from `Windows/run.bat`
+  - Python-templated HTML reports provide consistent, instant output without LLM dependencies
+  - Benefits: Faster reports (<1 second), no hallucinations, lower system requirements, deterministic output
 
 ### 2026-02-10 (Zero Trust HTML Reports)
 - **✅ Zero Trust HTML Reports** — Hybrid reporting now implemented for Zero Trust Assessment

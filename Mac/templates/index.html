@@ -457,12 +457,6 @@ body {
         <button id="scanBtn">SCAN</button>
         <button id="stopScanBtn" class="stop-btn">STOP</button>
     </div>
-    <div class="checkbox-row">
-        <label class="checkbox-label">
-            <input type="checkbox" id="scanUseLlm" />
-            Generate AI-enhanced analysis (adds 2-5 min)
-        </label>
-    </div>
     {% if interfaces %}
     <div class="interfaces">
         {% for name, ip, network in interfaces %}
@@ -531,10 +525,6 @@ body {
             <input type="checkbox" id="m365UpdateMaesterTests" />
             Update Maester tests (refresh cached tests)
         </label>
-        <label class="checkbox-label" style="margin-left: 20px;">
-            <input type="checkbox" id="m365UseLlm" />
-            Generate AI-enhanced summary (adds 2-3 min)
-        </label>
     </div>
     <p style="color:#7d8590; font-size:0.8rem; margin-top:10px; text-align:center;">
         Requires PowerShell 7 and will prompt for Microsoft 365 authentication (Global Reader recommended)
@@ -598,10 +588,6 @@ body {
             <input type="checkbox" id="ariSkipDiagram" />
             Skip network diagram generation
         </label>
-        <label class="checkbox-label" style="margin-left: 20px;">
-            <input type="checkbox" id="ariUseLlm" />
-            Generate AI-enhanced analysis (adds 5-10 min)
-        </label>
     </div>
     <p style="color:#7d8590; font-size:0.8rem; margin-top:10px; text-align:center;">
         Requires PowerShell 7 and will prompt for Azure authentication (Reader access to subscriptions)
@@ -655,12 +641,6 @@ body {
                autocomplete="off" style="flex:0 0 200px;" />
         <button id="ztAssessBtn">RUN ASSESSMENT</button>
         <button id="ztStopBtn" class="stop-btn">STOP</button>
-    </div>
-    <div class="checkbox-row">
-        <label class="checkbox-label">
-            <input type="checkbox" id="ztUseLlm" />
-            Generate AI-enhanced analysis (adds 5-10 min)
-        </label>
     </div>
     <p style="color:#7d8590; font-size:0.8rem; margin-top:10px; text-align:center;">
         Requires PowerShell 7 and will prompt for Microsoft 365 authentication (Global Reader or Admin)
@@ -749,9 +729,6 @@ function startScan() {
     // Generate session ID for this scan
     scanSessionId = Date.now().toString();
 
-    // Get options
-    const useLlm = document.getElementById('scanUseLlm').checked;
-
     // reset UI
     reportAccum = '';
     document.getElementById('scanBtn').disabled = true;
@@ -768,8 +745,7 @@ function startScan() {
     es = new EventSource('/scan?target=' + encodeURIComponent(target) +
                          '&client=' + encodeURIComponent(client) +
                          '&depth='  + encodeURIComponent(depth) +
-                         '&session=' + encodeURIComponent(scanSessionId) +
-                         '&useLlm=' + useLlm);
+                         '&session=' + encodeURIComponent(scanSessionId));
 
     // default event → log line
     es.onmessage = e => appendLog(e.data);
@@ -923,9 +899,6 @@ function startZtAssessment() {
     // Generate session ID for this assessment
     ztSessionId = Date.now().toString();
 
-    // Get options
-    const useLlm = document.getElementById('ztUseLlm').checked;
-
     // reset UI
     ztReportAccum = '';
     document.getElementById('ztAssessBtn').disabled = true;
@@ -939,8 +912,7 @@ function startZtAssessment() {
     ztSetStatus('Starting Zero Trust Assessment…', 'scanning');
 
     ztEs = new EventSource('/zerotrust?client=' + encodeURIComponent(client) +
-                           '&session=' + encodeURIComponent(ztSessionId) +
-                           '&useLlm=' + useLlm);
+                           '&session=' + encodeURIComponent(ztSessionId));
 
     // default event → log line
     ztEs.onmessage = e => ztAppendLog(e.data);
@@ -1090,7 +1062,6 @@ function startAriAssessment() {
     // Get options
     const includeSecurityCenter = document.getElementById('ariSecurityCenter').checked;
     const skipDiagram = document.getElementById('ariSkipDiagram').checked;
-    const useLlm = document.getElementById('ariUseLlm').checked;
 
     // reset UI
     ariReportAccum = '';
@@ -1107,8 +1078,7 @@ function startAriAssessment() {
     const url = '/azureinventory?client=' + encodeURIComponent(client) +
                 '&session=' + encodeURIComponent(ariSessionId) +
                 '&securityCenter=' + includeSecurityCenter +
-                '&skipDiagram=' + skipDiagram +
-                '&useLlm=' + useLlm;
+                '&skipDiagram=' + skipDiagram;
 
     ariEs = new EventSource(url);
 
@@ -1263,7 +1233,6 @@ function startM365Assessment() {
     // Get options
     const skipMaester = document.getElementById('m365SkipMaester').checked;
     const updateMaesterTests = document.getElementById('m365UpdateMaesterTests').checked;
-    const useLlm = document.getElementById('m365UseLlm').checked;
 
     // reset UI
     m365ReportAccum = '';
@@ -1280,8 +1249,7 @@ function startM365Assessment() {
     const url = '/m365assessment?client=' + encodeURIComponent(client) +
                 '&session=' + encodeURIComponent(m365SessionId) +
                 '&skipMaester=' + skipMaester +
-                '&updateMaesterTests=' + updateMaesterTests +
-                '&useLlm=' + useLlm;
+                '&updateMaesterTests=' + updateMaesterTests;
 
     m365Es = new EventSource(url);
 

@@ -96,12 +96,6 @@ if %errorLevel% neq 0 (
     %PYTHON% -m pip install flask --quiet
 )
 
-%PYTHON% -c "import ollama" >nul 2>&1
-if %errorLevel% neq 0 (
-    echo [*] Installing ollama Python package...
-    %PYTHON% -m pip install ollama --quiet
-)
-
 echo [+] Python packages ready.
 echo.
 
@@ -144,60 +138,6 @@ if %errorLevel% equ 0 (
 if %NMAP_FOUND% equ 1 (
     echo [+] nmap ready.
 )
-echo.
-
-:: Check for Ollama
-echo [*] Checking Ollama...
-set OLLAMA_FOUND=0
-where ollama >nul 2>&1
-if %errorLevel% equ 0 (
-    set OLLAMA_FOUND=1
-    goto :ollama_found
-)
-if exist "%LOCALAPPDATA%\Programs\Ollama\ollama.exe" (
-    set OLLAMA_FOUND=1
-    goto :ollama_found
-)
-if exist "C:\Program Files\Ollama\ollama.exe" (
-    set OLLAMA_FOUND=1
-    goto :ollama_found
-)
-
-:: Ollama not found - try to install
-echo [!] Ollama not found. Attempting to install...
-echo [*] Downloading Ollama installer...
-powershell -Command "Invoke-WebRequest -Uri 'https://ollama.com/download/OllamaSetup.exe' -OutFile '%TEMP%\OllamaSetup.exe'"
-if %errorLevel% equ 0 (
-    echo [*] Running Ollama installer...
-    start /wait "" "%TEMP%\OllamaSetup.exe" /SILENT
-    del "%TEMP%\OllamaSetup.exe" >nul 2>&1
-    echo [+] Ollama installed!
-    set OLLAMA_FOUND=1
-    :: Wait for Ollama service to start
-    timeout /t 3 /nobreak >nul
-) else (
-    echo [!] Failed to download Ollama. Please install manually from:
-    echo     https://ollama.com/download
-)
-
-:ollama_found
-if %OLLAMA_FOUND% neq 1 goto :skip_ollama_model
-echo [+] Ollama ready.
-:: Check if model is available, pull if not
-echo [*] Checking for qwen2.5:7b model...
-ollama list 2>nul | findstr /C:"qwen2.5:7b" >nul
-if %errorLevel% equ 0 (
-    echo [+] Model qwen2.5:7b ready.
-    goto :skip_ollama_model
-)
-echo [*] Pulling qwen2.5:7b model - this may take a few minutes...
-ollama pull qwen2.5:7b
-if %errorLevel% equ 0 (
-    echo [+] Model downloaded successfully!
-) else (
-    echo [!] Failed to pull model. The app will try again when needed.
-)
-:skip_ollama_model
 echo.
 
 :: Check for PowerShell 7 (required for M365, Zero Trust, and Azure Inventory tabs)
