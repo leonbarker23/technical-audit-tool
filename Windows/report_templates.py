@@ -872,7 +872,7 @@ class M365TemplatedReport(ReportSection):
         if waste and waste.get("estimatedMonthlyGBP", 0) > 500:
             monthly = waste.get("estimatedMonthlyGBP", 0)
             annual = monthly * 12
-            immediate.append(f"Reclaim wasted licenses - £{monthly:,.2f}/month waste identified (potential annual savings: £{annual:,.2f})")
+            immediate.append(f"Reclaim wasted licenses - GBP{monthly:,.2f}/month waste identified (potential annual savings: GBP{annual:,.2f})")
 
         # Intune
         intune = data.get("intune", {})
@@ -890,7 +890,7 @@ class M365TemplatedReport(ReportSection):
 
         if immediate:
             items_html = "".join([f'<li style="color:#c9d1d9;line-height:1.8;margin-bottom:8px;">{item}</li>' for item in immediate])
-            sections.append(f'''<h3 style="color:#f85149;font-size:1rem;margin:16px 0 12px;">🚨 Immediate Actions (0-30 days)</h3>
+            sections.append(f'''<h3 style="color:#f85149;font-size:1rem;margin:16px 0 12px;">[!!] Immediate Actions (0-30 days)</h3>
 <ul style="margin:0 0 16px 24px;padding:0;">{items_html}</ul>''')
 
         if short_term:
@@ -900,7 +900,7 @@ class M365TemplatedReport(ReportSection):
 
         if strategic:
             items_html = "".join([f'<li style="color:#c9d1d9;line-height:1.8;margin-bottom:8px;">{item}</li>' for item in strategic])
-            sections.append(f'''<h3 style="color:#039be5;font-size:1rem;margin:16px 0 12px;">🎯 Strategic Initiatives (3-12 months)</h3>
+            sections.append(f'''<h3 style="color:#039be5;font-size:1rem;margin:16px 0 12px;">[>] Strategic Initiatives (3-12 months)</h3>
 <ul style="margin:0 0 16px 24px;padding:0;">{items_html}</ul>''')
 
         return f'''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">7. Project Recommendations</h2>
@@ -1495,20 +1495,20 @@ class NetworkTemplatedReport(ReportSection):
         # Build comprehensive port table
         rows = []
         for ip, info in sorted(self.active_hosts.items(), key=self._ip_sort_key):
-            hostname = info.get('hostname') or '—'
+            hostname = info.get('hostname') or '-'
             os_info = info.get('os', 'Unknown')
             if len(os_info) > 30:
                 os_info = os_info[:27] + "..."
 
             if not info.get('protocols'):
-                rows.append([ip, hostname, os_info, "—", "—", "—", "—", "—"])
+                rows.append([ip, hostname, os_info, "-", "-", "-", "-", "-"])
             else:
                 for proto, ports in info.get('protocols', {}).items():
                     for port in ports:
-                        port_num = port.get('port', '—')
-                        state = port.get('state', '—')
-                        service = port.get('name', '—')
-                        product = f"{port.get('product', '')} {port.get('version', '')}".strip() or '—'
+                        port_num = port.get('port', '-')
+                        state = port.get('state', '-')
+                        service = port.get('name', '-')
+                        product = f"{port.get('product', '')} {port.get('version', '')}".strip() or '-'
                         rows.append([ip, hostname, os_info, str(port_num), proto.upper(), state, service, product])
 
         port_table = self.format_table(
@@ -1912,15 +1912,15 @@ class AzureTemplatedReport(ReportSection):
         # Observations
         observations = []
         if stopped_vms > 0 and stopped_vms >= running_vms * 0.3:
-            observations.append(f"<li><strong>{stopped_vms} stopped/deallocated VMs</strong> detected — potential cost savings or cleanup opportunity</li>")
+            observations.append(f"<li><strong>{stopped_vms} stopped/deallocated VMs</strong> detected - potential cost savings or cleanup opportunity</li>")
         if len(locations) == 1:
-            observations.append("<li><strong>Single-region deployment</strong> — consider DR/availability requirements</li>")
+            observations.append("<li><strong>Single-region deployment</strong> - consider DR/availability requirements</li>")
         elif len(locations) > 3:
-            observations.append(f"<li><strong>Multi-region presence</strong> across {len(locations)} regions — good for availability, review for cost optimisation</li>")
+            observations.append(f"<li><strong>Multi-region presence</strong> across {len(locations)} regions - good for availability, review for cost optimisation</li>")
 
         key_vaults = len(self.security.get("keyVaults", []))
         if key_vaults == 0:
-            observations.append("<li><strong>No Key Vaults detected</strong> — secrets management may need review</li>")
+            observations.append("<li><strong>No Key Vaults detected</strong> - secrets management may need review</li>")
 
         observations_html = f"<ul style='margin:12px 0;padding-left:20px;'>{''.join(observations)}</ul>" if observations else ""
 
@@ -2057,9 +2057,9 @@ This assessment covers <strong>{env_desc}</strong> with <strong>{total_resources
             for cluster in aks[:5]:
                 rows.append([
                     cluster.get("name", "Unknown"),
-                    cluster.get("kubernetesVersion", "—"),
-                    str(cluster.get("nodeCount", "—")),
-                    self.REGION_NAMES.get(cluster.get("location", ""), cluster.get("location", "—"))
+                    cluster.get("kubernetesVersion", "-"),
+                    str(cluster.get("nodeCount", "-")),
+                    self.REGION_NAMES.get(cluster.get("location", ""), cluster.get("location", "-"))
                 ])
             aks_table = self.format_table(["Cluster Name", "K8s Version", "Nodes", "Region"], rows)
             html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">AKS Clusters ({len(aks)})</h3>
@@ -2106,9 +2106,9 @@ This assessment covers <strong>{env_desc}</strong> with <strong>{total_resources
             for vnet in vnets[:10]:
                 rows.append([
                     vnet.get("name", "Unknown"),
-                    vnet.get("addressSpace", "—"),
-                    self.REGION_NAMES.get(vnet.get("location", ""), vnet.get("location", "—")),
-                    vnet.get("resourceGroup", "—")
+                    vnet.get("addressSpace", "-"),
+                    self.REGION_NAMES.get(vnet.get("location", ""), vnet.get("location", "-")),
+                    vnet.get("resourceGroup", "-")
                 ])
             vnet_table = self.format_table(["VNet Name", "Address Space", "Region", "Resource Group"], rows)
             html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">Virtual Networks</h3>
@@ -2118,7 +2118,7 @@ This assessment covers <strong>{env_desc}</strong> with <strong>{total_resources
         if pips:
             assigned_pips = [p for p in pips if p.get("ipAddress")]
             html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">Public IP Addresses</h3>
-<p style="color:#c9d1d9;"><strong>{len(assigned_pips)}</strong> assigned public IPs detected — review for security exposure</p>''')
+<p style="color:#c9d1d9;"><strong>{len(assigned_pips)}</strong> assigned public IPs detected - review for security exposure</p>''')
 
         return "\n".join(html_parts)
 
@@ -2154,9 +2154,9 @@ This assessment covers <strong>{env_desc}</strong> with <strong>{total_resources
             for sa in storage_accounts[:10]:
                 rows.append([
                     sa.get("name", "Unknown"),
-                    sa.get("kind", "—"),
-                    sa.get("accessTier", "—"),
-                    self.REGION_NAMES.get(sa.get("location", ""), sa.get("location", "—"))
+                    sa.get("kind", "-"),
+                    sa.get("accessTier", "-"),
+                    self.REGION_NAMES.get(sa.get("location", ""), sa.get("location", "-"))
                 ])
             sa_table = self.format_table(["Storage Account", "Kind", "Access Tier", "Region"], rows)
 
@@ -2197,14 +2197,14 @@ This assessment covers <strong>{env_desc}</strong> with <strong>{total_resources
             for kv in key_vaults[:10]:
                 rows.append([
                     kv.get("name", "Unknown"),
-                    self.REGION_NAMES.get(kv.get("location", ""), kv.get("location", "—")),
-                    kv.get("resourceGroup", "—")
+                    self.REGION_NAMES.get(kv.get("location", ""), kv.get("location", "-")),
+                    kv.get("resourceGroup", "-")
                 ])
             kv_table = self.format_table(["Key Vault", "Region", "Resource Group"], rows)
             html_parts.append(f'''<h3 style="color:#c9d1d9;font-size:1.1rem;margin:20px 0 12px;">Key Vaults ({len(key_vaults)})</h3>
 {kv_table}''')
         else:
-            html_parts.append('''<p style="color:#d29922;margin:12px 0;">[!] <strong>No Key Vaults detected</strong> — consider implementing centralised secrets management</p>''')
+            html_parts.append('''<p style="color:#d29922;margin:12px 0;">[!] <strong>No Key Vaults detected</strong> - consider implementing centralised secrets management</p>''')
 
         # Security Center recommendations
         if recommendations:
@@ -2639,17 +2639,17 @@ class ZeroTrustTemplatedReport(ReportSection):
 
         # CA policy observations
         if ca_policies == 0:
-            observations.append(("Critical", "No Conditional Access policies detected — identity perimeter is not protected"))
+            observations.append(("Critical", "No Conditional Access policies detected - identity perimeter is not protected"))
         elif ca_policies < 3:
-            observations.append(("High", f"Only {ca_policies} CA policies — baseline protection likely incomplete"))
+            observations.append(("High", f"Only {ca_policies} CA policies - baseline protection likely incomplete"))
 
         # Global admin observations
         if global_admins == 0:
-            observations.append(("Medium", "No Global Administrators detected — may indicate permission issues"))
+            observations.append(("Medium", "No Global Administrators detected - may indicate permission issues"))
         elif global_admins == 1:
-            observations.append(("Medium", "Only 1 Global Admin — single point of failure, need break-glass account"))
+            observations.append(("Medium", "Only 1 Global Admin - single point of failure, need break-glass account"))
         elif global_admins > 5:
-            observations.append(("High", f"{global_admins} Global Admins — excessive privileged access, review for least privilege"))
+            observations.append(("High", f"{global_admins} Global Admins - excessive privileged access, review for least privilege"))
 
         # Device compliance
         device_summary = self.devices.get("summary", {})
@@ -2658,15 +2658,15 @@ class ZeroTrustTemplatedReport(ReportSection):
             total = device_summary.get("totalDevices", 0)
             pct = (non_compliant / total * 100) if total > 0 else 0
             if pct > 20:
-                observations.append(("High", f"{non_compliant} non-compliant devices ({pct:.0f}%) — significant endpoint risk"))
+                observations.append(("High", f"{non_compliant} non-compliant devices ({pct:.0f}%) - significant endpoint risk"))
             else:
                 observations.append(("Medium", f"{non_compliant} non-compliant devices detected"))
 
         # Test failures
         if failed_count > 20:
-            observations.append(("High", f"{failed_count} security tests failed — multiple areas need attention"))
+            observations.append(("High", f"{failed_count} security tests failed - multiple areas need attention"))
         elif failed_count > 10:
-            observations.append(("Medium", f"{failed_count} security tests failed — review and prioritise remediation"))
+            observations.append(("Medium", f"{failed_count} security tests failed - review and prioritise remediation"))
 
         observations_html = ""
         if observations:
@@ -2836,7 +2836,7 @@ class ZeroTrustTemplatedReport(ReportSection):
             risk = test.get("TestRisk", "Unknown")
             risk_badge = self.risk_badge(risk.capitalize() if risk else "Low")
             title = test.get("TestTitle", "Unknown test")
-            category = test.get("TestCategory", "—")
+            category = test.get("TestCategory", "-")
             rows.append([risk_badge, title[:60] + ("..." if len(title) > 60 else ""), category])
 
         if rows:
@@ -2876,7 +2876,7 @@ class ZeroTrustTemplatedReport(ReportSection):
         if global_admins == 1:
             immediate.append("Create break-glass emergency access account with monitoring")
         elif global_admins > 5:
-            immediate.append(f"Review and reduce {global_admins} Global Admin accounts — implement least privilege")
+            immediate.append(f"Review and reduce {global_admins} Global Admin accounts - implement least privilege")
 
         if compliance_policies == 0:
             immediate.append("Create device compliance policies for Windows, iOS, and Android")
