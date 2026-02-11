@@ -185,9 +185,6 @@ echo   All dependencies ready - Starting app...
 echo ============================================
 echo.
 
-:: Open browser after server starts (wait 5 seconds for Flask to initialize)
-start "" cmd /c "timeout /t 5 /nobreak >nul && start http://127.0.0.1:5000"
-
 %PYTHON% "%~dp0app.py"
 
 pause
