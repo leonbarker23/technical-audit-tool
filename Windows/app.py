@@ -764,9 +764,10 @@ def _open_browser():
 
 
 if __name__ == "__main__":
-    if os.geteuid() != 0:
-        print("[!] nmap requires root for OS detection (-O).")
-        print("    Run with: sudo venv/bin/python app.py")
+    import ctypes
+    if not ctypes.windll.shell32.IsUserAnAdmin():
+        print("[!] nmap requires Administrator for OS detection (-O).")
+        print("    Right-click run.bat and select 'Run as administrator'")
         sys.exit(1)
 
     print("[*] Discovery Tool → http://127.0.0.1:5000")
