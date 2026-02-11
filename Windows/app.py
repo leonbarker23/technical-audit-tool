@@ -173,7 +173,7 @@ def scan():
                 # Save structured report as HTML
                 structured_file = f"{client}_{safe_target}_{timestamp}_report.html"
                 structured_path = os.path.join(client_folder, structured_file)
-                with open(structured_path, "w") as f:
+                with open(structured_path, "w", encoding="utf-8") as f:
                     f.write(structured_report_file)
 
                 yield sse(f"[✓] Structured report generated: {structured_file}", event="status")
@@ -342,7 +342,7 @@ def zerotrust():
 
             # Load the assessment data
             yield sse("Parsing assessment data…", event="status")
-            with open(os.path.join(BASE_DIR, json_file), "r", encoding="utf-8") as f:
+            with open(os.path.join(BASE_DIR, json_file), "r", encoding="utf-8-sig") as f:
                 assessment_data = json.load(f)
 
             # Load detailed ZT assessment data if available (from Microsoft module)
@@ -369,7 +369,7 @@ def zerotrust():
             # Save standalone HTML report
             summary_html_file = f"zerotrust_summary_{timestamp}.html"
             summary_html_path = os.path.join(client_folder, summary_html_file)
-            with open(summary_html_path, "w") as f:
+            with open(summary_html_path, "w", encoding="utf-8") as f:
                 f.write(report_gen.generate(standalone=True))
 
             yield sse("[+] Structured HTML report generated")
@@ -521,7 +521,7 @@ def azureinventory():
 
             # Load the inventory data
             yield sse("Parsing inventory data...", event="status")
-            with open(os.path.join(BASE_DIR, json_file), "r", encoding="utf-8") as f:
+            with open(os.path.join(BASE_DIR, json_file), "r", encoding="utf-8-sig") as f:
                 inventory_data = json.load(f)
 
             # ── Generate Python-templated HTML report (instant) ──
@@ -539,7 +539,7 @@ def azureinventory():
             # Save standalone HTML report
             html_file = f"azureinventory_report_{timestamp}.html"
             html_path = os.path.join(ari_folder, html_file)
-            with open(html_path, "w") as f:
+            with open(html_path, "w", encoding="utf-8") as f:
                 f.write(report_gen.generate(standalone=True))
 
             yield sse("[+] Structured HTML report generated")
@@ -696,7 +696,7 @@ def m365assessment():
 
             # Load the assessment data
             yield sse("Parsing assessment data...", event="status")
-            with open(os.path.join(BASE_DIR, json_file), "r", encoding="utf-8") as f:
+            with open(os.path.join(BASE_DIR, json_file), "r", encoding="utf-8-sig") as f:
                 assessment_data = json.load(f)
 
             # Generate Python-templated structured report (instant, HTML)
@@ -715,7 +715,7 @@ def m365assessment():
                 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
                 structured_file = f"m365assessment_structured_{timestamp}.html"
                 structured_path = os.path.join(client_folder, structured_file)
-                with open(structured_path, "w") as f:
+                with open(structured_path, "w", encoding="utf-8") as f:
                     f.write(structured_report_file)
 
                 yield sse(f"[✓] Structured report generated: {structured_file}", event="status")
