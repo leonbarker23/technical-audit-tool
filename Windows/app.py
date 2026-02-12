@@ -755,6 +755,188 @@ def m365assessment():
                     mimetype="text/event-stream", headers=headers)
 
 
+# ── Cyber Risk Scorecard ──────────────────────────────────────────────────────
+
+@app.route("/cyberrisk")
+def cyberrisk():
+    client = request.args.get("client", "").strip()
+    session_id = request.args.get("session", "").strip()
+    skip_defender = request.args.get("skipDefender", "").lower() == "true"
+    skip_sharepoint = request.args.get("skipSharePoint", "").lower() == "true"
+
+    if not client or not _CLIENT_RE.match(client):
+        return Response(sse("Invalid or missing client name.", event="cr_error"),
+                        mimetype="text/event-stream")
+
+    def generate():
+        import shutil
+        from datetime import datetime
+
+        # Check for PowerShell
+        pwsh_path = shutil.which("pwsh")
+        if not pwsh_path:
+            yield sse("PowerShell 7 (pwsh) not found.", event="cr_error")
+            yield sse("Install with: winget install Microsoft.PowerShell", event="cr_error")
+            return
+
+        yield sse("[*] PowerShell 7 found: " + pwsh_path)
+        yield sse("[*] Client: " + client)
+        yield sse("")
+
+        # Create client folder if needed
+        client_folder = os.path.join(BASE_DIR, client)
+        os.makedirs(client_folder, exist_ok=True)
+
+        # Run the Cyber Risk Scorecard PowerShell script
+        script_path = os.path.join(BASE_DIR, "cyberrisk.ps1")
+        if not os.path.exists(script_path):
+            yield sse("cyberrisk.ps1 script not found.", event="cr_error")
+            return
+
+        # Check for config file
+        config_path = os.path.join(BASE_DIR, "cyberrisk_config.json")
+        if not os.path.exists(config_path):
+            yield sse("cyberrisk_config.json not found.", event="cr_error")
+            return
+
+        yield sse("[*] Running Cyber Risk Assessment...")
+        yield sse("[*] Device code authentication will be required")
+        yield sse("")
+
+        cmd = [
+            pwsh_path, "-NoProfile", "-ExecutionPolicy", "Bypass",
+            "-File", script_path,
+            "-OutputPath", BASE_DIR,
+            "-ClientName", client,
+            "-ConfigPath", config_path
+        ]
+
+        if skip_defender:
+            cmd.append("-SkipDefenderVulnerabilities")
+        if skip_sharepoint:
+            cmd.append("-SkipSharePointAdmin")
+
+        proc = None
+        json_file = None
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=BASE_DIR
+            )
+
+            # Register process for stop functionality
+            if session_id:
+                _active_processes[session_id] = proc
+
+            # Regex to strip ANSI escape codes
+            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+            in_output_block = False
+            for line in proc.stdout:
+                stripped = line.rstrip("\n")
+                # Remove ANSI color codes
+                stripped = ansi_escape.sub('', stripped)
+
+                # Parse output file markers
+                if stripped == "=== OUTPUT_FILES ===":
+                    in_output_block = True
+                    continue
+                elif stripped == "=== END_OUTPUT_FILES ===":
+                    in_output_block = False
+                    continue
+                elif in_output_block:
+                    if stripped.startswith("JSON:"):
+                        json_file = stripped[5:]
+                    continue
+
+                if stripped:
+                    yield sse(stripped)
+
+            proc.wait()
+
+            if proc.returncode != 0:
+                yield sse(f"[!] Assessment exited with code {proc.returncode}", event="cr_error")
+                return
+
+            # Check if we got a JSON file
+            if not json_file:
+                # Look for most recent JSON in client folder
+                import glob
+                json_files = glob.glob(os.path.join(client_folder, "cyberrisk_*.json"))
+                if json_files:
+                    json_file = os.path.basename(max(json_files, key=os.path.getctime))
+                    json_file = f"{client}/{json_file}"
+
+            if not json_file or not os.path.exists(os.path.join(BASE_DIR, json_file)):
+                yield sse("[!] No assessment data file found.", event="cr_error")
+                return
+
+            # Load the assessment data
+            yield sse("Parsing assessment data...", event="status")
+            with open(os.path.join(BASE_DIR, json_file), "r", encoding="utf-8-sig") as f:
+                assessment_data = json.load(f)
+
+            # Get overall score for logging
+            overall_score = assessment_data.get("scores", {}).get("overall", 0)
+            grade = assessment_data.get("scores", {}).get("grade", "Unknown")
+            yield sse(f"[*] Cyber Risk Score: {overall_score}% ({grade})", event="status")
+
+            # Generate Python-templated HTML report (instant)
+            yield sse("[*] Generating scorecard report...", event="status")
+
+            try:
+                from report_templates import CyberRiskTemplatedReport
+                template_report = CyberRiskTemplatedReport(assessment_data)
+
+                # Generate standalone HTML for file (with full document structure)
+                structured_report_file = template_report.generate(standalone=True)
+                # Generate embedded HTML for web UI (just body content)
+                structured_report_ui = template_report.generate(standalone=False)
+
+                # Save structured report as HTML
+                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+                report_html_file = f"cyberrisk_report_{timestamp}.html"
+                report_html_path = os.path.join(client_folder, report_html_file)
+                with open(report_html_path, "w", encoding="utf-8") as f:
+                    f.write(structured_report_file)
+
+                yield sse(f"[+] Scorecard report generated: {report_html_file}", event="status")
+                yield sse("")
+
+                # Send embedded HTML to UI (no markdown parsing needed)
+                yield sse(structured_report_ui, event="report_html")
+
+            except Exception as exc:
+                yield sse(f"[!] Error generating scorecard report: {exc}", event="cr_error")
+                return
+
+            # Notify browser of files
+            files_data = {
+                "json": json_file,
+                "report_html": f"{client}/{report_html_file}",
+            }
+
+            yield sse(json.dumps(files_data), event="files")
+            yield sse("Cyber Risk Assessment complete.", event="done")
+
+        except Exception as exc:
+            yield sse(f"[!] Error: {exc}", event="cr_error")
+        finally:
+            # Clean up process tracking
+            if session_id and session_id in _active_processes:
+                del _active_processes[session_id]
+            if proc and proc.poll() is None:
+                proc.kill()
+
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    return Response(stream_with_context(generate()),
+                    mimetype="text/event-stream", headers=headers)
+
+
 # ── startup ─────────────────────────────────────────
 
 def _open_browser():

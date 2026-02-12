@@ -433,6 +433,10 @@ body {
         <span class="tab-icon">&#x1F512;</span>
         Zero Trust Assessment
     </button>
+    <button class="tab-btn" data-tab="cyberrisk">
+        <span class="tab-icon">&#x1F6E1;</span>
+        Cyber Risk Scorecard
+    </button>
 </nav>
 
 <!-- ══════════════════════════════════════════════════════════════════════════ -->
@@ -680,6 +684,69 @@ body {
 </div>
 
 </div><!-- end tab-zerotrust -->
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!-- TAB: Cyber Risk Scorecard -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div class="tab-content" id="tab-cyberrisk">
+
+<!-- input -->
+<div class="input-wrap">
+    <div class="input-row">
+        <input type="text" id="crClientInput"
+               placeholder="Client name"
+               autocomplete="off" style="flex:0 0 200px;" />
+        <button id="crAssessBtn">RUN ASSESSMENT</button>
+        <button id="crStopBtn" class="stop-btn">STOP</button>
+    </div>
+    <div style="display:flex; gap:20px; justify-content:center; margin-top:12px;">
+        <label style="display:flex; align-items:center; gap:6px; color:#7d8590; font-size:0.8rem; cursor:pointer;">
+            <input type="checkbox" id="crSkipDefender" style="cursor:pointer;">
+            Skip Defender vulnerability scan (faster)
+        </label>
+        <label style="display:flex; align-items:center; gap:6px; color:#7d8590; font-size:0.8rem; cursor:pointer;">
+            <input type="checkbox" id="crSkipSharePoint" style="cursor:pointer;">
+            Skip SharePoint admin (if no SPO admin access)
+        </label>
+    </div>
+    <p style="color:#7d8590; font-size:0.8rem; margin-top:10px; text-align:center;">
+        Requires PowerShell 7 and will prompt for Microsoft Graph, Security & Compliance, and SharePoint authentication
+    </p>
+</div>
+
+<!-- status -->
+<div class="status" id="crStatusBar">
+    <div class="spinner"></div>
+    <span id="crStatusText"></span>
+</div>
+
+<!-- panels -->
+<div class="panels">
+    <!-- left: live log -->
+    <div class="panel">
+        <div class="panel-head">
+            <div class="dot" id="crLogDot"></div>
+            <span>Assessment Progress</span>
+        </div>
+        <div id="crLogPanel" class="log-panel">
+            <div class="line dim">Waiting for assessment...</div>
+        </div>
+    </div>
+
+    <!-- right: report -->
+    <div class="panel">
+        <div class="panel-head">
+            <div class="dot" id="crReportDot"></div>
+            <span>Cyber Risk Scorecard</span>
+        </div>
+        <div id="crReportPanel" class="report-panel">
+            <p class="placeholder">The Cyber Risk Scorecard will appear here once the assessment is complete.</p>
+        </div>
+        <div class="dl-bar" id="crDlBar"></div>
+    </div>
+</div>
+
+</div><!-- end tab-cyberrisk -->
 
 <script>
 /* ── tab navigation ───────────────────────────────── */
@@ -1372,6 +1439,142 @@ function m365Dot(id, state) {
 
 function m365AppendLog(text, forceClass) {
     const panel = document.getElementById('m365LogPanel');
+    const div = document.createElement('div');
+    div.className = 'line ' + (forceClass || classForLine(text));
+    div.textContent = text;
+    panel.appendChild(div);
+    panel.scrollTop = panel.scrollHeight;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   CYBER RISK SCORECARD
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+let crEs = null;
+let crSessionId = null;
+
+document.getElementById('crAssessBtn').addEventListener('click', startCrAssessment);
+document.getElementById('crStopBtn').addEventListener('click', stopCrAssessment);
+document.getElementById('crClientInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') startCrAssessment();
+});
+
+function startCrAssessment() {
+    const client = document.getElementById('crClientInput').value.trim();
+    if (!client) { crSetStatus('Enter a client name first.', 'err'); return; }
+    if (crEs) { crEs.close(); crEs = null; }
+
+    // Generate session ID for this assessment
+    crSessionId = Date.now().toString();
+
+    // Get options
+    const skipDefender = document.getElementById('crSkipDefender').checked;
+    const skipSharePoint = document.getElementById('crSkipSharePoint').checked;
+
+    // reset UI
+    document.getElementById('crAssessBtn').disabled = true;
+    document.getElementById('crStopBtn').classList.add('show');
+    document.getElementById('crLogPanel').innerHTML = '';
+    document.getElementById('crReportPanel').innerHTML = '<p class="placeholder">Waiting for scorecard...</p>';
+    document.getElementById('crDlBar').classList.remove('show');
+    document.getElementById('crDlBar').innerHTML = '';
+    crDot('crLogDot', 'active');
+    crDot('crReportDot', '');
+    crSetStatus('Starting Cyber Risk Assessment...', 'scanning');
+
+    const url = '/cyberrisk?client=' + encodeURIComponent(client) +
+                '&session=' + encodeURIComponent(crSessionId) +
+                '&skipDefender=' + skipDefender +
+                '&skipSharePoint=' + skipSharePoint;
+
+    crEs = new EventSource(url);
+
+    // default event -> log line
+    crEs.onmessage = e => crAppendLog(e.data);
+
+    crEs.addEventListener('status', e => {
+        crSetStatus(e.data, 'analyzing');
+        crAppendLog('[*] ' + e.data, 'warn');
+    });
+
+    // HTML report (structured scorecard - no markdown parsing needed)
+    crEs.addEventListener('report_html', e => {
+        crDot('crReportDot', 'active');
+        const rp = document.getElementById('crReportPanel');
+        rp.innerHTML = e.data;
+        rp.scrollTop = 0;  // Scroll to top for structured report
+    });
+
+    // generated-file download links
+    crEs.addEventListener('files', e => {
+        const f = JSON.parse(e.data);
+        const bar = document.getElementById('crDlBar');
+        let btns = `<a href="/download/${f.json}" class="dl-btn" download>JSON</a>`;
+        if (f.report_html) {
+            btns += `<a href="/download/${f.report_html}" class="dl-btn zt-html" target="_blank">Scorecard HTML</a>`;
+        }
+        bar.innerHTML = btns;
+        bar.classList.add('show');
+    });
+
+    crEs.addEventListener('done', e => {
+        crSetStatus(e.data, 'done');
+        crDot('crLogDot', 'done');
+        crDot('crReportDot', 'done');
+        document.getElementById('crAssessBtn').disabled = false;
+        document.getElementById('crStopBtn').classList.remove('show');
+        crEs.close(); crEs = null;
+        crSessionId = null;
+    });
+
+    crEs.addEventListener('cr_error', e => {
+        crSetStatus(e.data, 'err');
+        crAppendLog('[!] ' + e.data, 'err');
+        crDot('crLogDot', '');
+        document.getElementById('crAssessBtn').disabled = false;
+        document.getElementById('crStopBtn').classList.remove('show');
+        crEs.close(); crEs = null;
+        crSessionId = null;
+    });
+
+    crEs.onerror = () => {
+        if (crEs) {
+            crSetStatus('Connection lost', 'err');
+            document.getElementById('crAssessBtn').disabled = false;
+            document.getElementById('crStopBtn').classList.remove('show');
+            crEs.close(); crEs = null;
+            crSessionId = null;
+        }
+    };
+}
+
+function stopCrAssessment() {
+    if (crSessionId) {
+        fetch('/stop?session=' + encodeURIComponent(crSessionId), { method: 'POST' });
+    }
+    if (crEs) {
+        crEs.close();
+        crEs = null;
+    }
+    crSetStatus('Assessment stopped by user.', 'err');
+    crAppendLog('[!] Assessment stopped by user.', 'err');
+    crDot('crLogDot', '');
+    document.getElementById('crAssessBtn').disabled = false;
+    document.getElementById('crStopBtn').classList.remove('show');
+    crSessionId = null;
+}
+
+function crSetStatus(msg, cls) {
+    document.getElementById('crStatusBar').className = 'status ' + cls;
+    document.getElementById('crStatusText').textContent = msg;
+}
+
+function crDot(id, state) {
+    document.getElementById(id).className = 'dot' + (state ? ' ' + state : '');
+}
+
+function crAppendLog(text, forceClass) {
+    const panel = document.getElementById('crLogPanel');
     const div = document.createElement('div');
     div.className = 'line ' + (forceClass || classForLine(text));
     div.textContent = text;

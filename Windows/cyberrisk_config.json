@@ -1,0 +1,154 @@
+{
+    "version": "1.0",
+    "lastUpdated": "2026-02-12",
+    "description": "Scoring configuration for Cyber Risk Scorecard. Update SKUs as Microsoft adds/renames licenses.",
+
+    "scoringThresholds": {
+        "mfaRegistration": {
+            "100": 8, "95": 7, "90": 6, "80": 5, "70": 3, "50": 2, "0": 0
+        },
+        "mfaEnforcement": {
+            "Conditional Access (all users)": 8,
+            "Security Defaults": 6,
+            "Conditional Access (partial)": 4,
+            "Per-user MFA": 2,
+            "None detected": 0
+        },
+        "passwordless": {
+            "50": 4, "20": 3, "10": 2, "0": 0
+        },
+        "smsOnlyThreshold": 10,
+        "secureScore": {
+            "80": 15, "70": 13, "60": 10, "50": 7, "40": 4, "0": 0
+        },
+        "caPolicyCount": {
+            "10": 6, "7": 5, "5": 4, "3": 3, "1": 1, "0": 0
+        },
+        "globalAdminCount": {
+            "optimal": [2, 4],
+            "acceptable": [5, 6],
+            "single": 1,
+            "high": [7, 10],
+            "excessive": 11
+        },
+        "deviceEnrollment": {
+            "90": 4, "75": 3, "50": 2, "25": 1, "0": 0
+        },
+        "deviceCompliance": {
+            "95": 3, "85": 2, "70": 1, "0": 0
+        },
+        "grades": {
+            "Excellent": 85,
+            "Good": 70,
+            "NeedsImprovement": 50,
+            "AtRisk": 0
+        }
+    },
+
+    "licenseScoring": {
+        "_comment": "score = points for primary license, addon = true means only adds bonus points",
+
+        "SPE_E5": { "score": 15, "name": "Microsoft 365 E5" },
+        "ENTERPRISEPREMIUM": { "score": 15, "name": "Office 365 E5" },
+        "M365_E5": { "score": 15, "name": "Microsoft 365 E5" },
+        "MICROSOFT_365_E5": { "score": 15, "name": "Microsoft 365 E5" },
+        "Microsoft_365_E5": { "score": 15, "name": "Microsoft 365 E5" },
+
+        "IDENTITY_THREAT_PROTECTION": { "score": 14, "name": "Microsoft 365 E5 Security" },
+        "M365_E5_SECURITY": { "score": 14, "name": "Microsoft 365 E5 Security" },
+
+        "SPE_E3": { "score": 10, "name": "Microsoft 365 E3" },
+        "ENTERPRISEPACK": { "score": 10, "name": "Office 365 E3" },
+        "M365_E3": { "score": 10, "name": "Microsoft 365 E3" },
+        "Microsoft_365_E3": { "score": 10, "name": "Microsoft 365 E3" },
+
+        "SPE_F1": { "score": 4, "name": "Microsoft 365 F1" },
+        "M365_F1": { "score": 4, "name": "Microsoft 365 F1" },
+        "SPE_F3": { "score": 6, "name": "Microsoft 365 F3" },
+        "M365_F3": { "score": 6, "name": "Microsoft 365 F3" },
+
+        "SPB": { "score": 12, "name": "Microsoft 365 Business Premium" },
+        "M365_BUSINESS_PREMIUM": { "score": 12, "name": "Microsoft 365 Business Premium" },
+        "SMB_BUSINESS_PREMIUM": { "score": 12, "name": "Microsoft 365 Business Premium" },
+
+        "O365_BUSINESS_PREMIUM": { "score": 5, "name": "Microsoft 365 Business Standard" },
+        "M365_BUSINESS_STANDARD": { "score": 5, "name": "Microsoft 365 Business Standard" },
+        "SMB_BUSINESS": { "score": 5, "name": "Microsoft 365 Business Standard" },
+
+        "O365_BUSINESS_ESSENTIALS": { "score": 3, "name": "Microsoft 365 Business Basic" },
+        "M365_BUSINESS_BASIC": { "score": 3, "name": "Microsoft 365 Business Basic" },
+        "SMB_BUSINESS_ESSENTIALS": { "score": 3, "name": "Microsoft 365 Business Basic" },
+
+        "DEFENDER_ENDPOINT_P2": { "score": 3, "name": "Defender for Endpoint P2", "addon": true },
+        "MDATP_XPLAT": { "score": 3, "name": "Defender for Endpoint P2", "addon": true },
+        "DEFENDER_ENDPOINT_P1": { "score": 2, "name": "Defender for Endpoint P1", "addon": true },
+        "ATP_ENTERPRISE": { "score": 2, "name": "Defender for Office 365 P1", "addon": true },
+        "THREAT_INTELLIGENCE": { "score": 2, "name": "Defender for Office 365 P2", "addon": true },
+
+        "AAD_PREMIUM_P2": { "score": 2, "name": "Entra ID P2", "addon": true },
+        "AAD_PREMIUM_P1": { "score": 1, "name": "Entra ID P1", "addon": true },
+        "AAD_PREMIUM": { "score": 1, "name": "Entra ID P1", "addon": true },
+
+        "INTUNE_A": { "score": 1, "name": "Microsoft Intune", "addon": true },
+        "INTUNE_P1": { "score": 1, "name": "Microsoft Intune P1", "addon": true },
+
+        "EMS_E5": { "score": 3, "name": "EMS E5", "addon": true },
+        "EMS_E3": { "score": 2, "name": "EMS E3", "addon": true },
+        "EMSPREMIUM": { "score": 3, "name": "EMS E5", "addon": true }
+    },
+
+    "capabilitySkus": {
+        "_comment": "SKUs that indicate certain security capabilities are available",
+
+        "defenderP1": [
+            "ATP_ENTERPRISE", "DEFENDER_ENDPOINT_P1", "SPB", "M365_BUSINESS_PREMIUM",
+            "SMB_BUSINESS_PREMIUM", "SPE_E3", "M365_E3", "SPE_F3", "M365_F3"
+        ],
+        "defenderP2": [
+            "DEFENDER_ENDPOINT_P2", "MDATP_XPLAT", "SPE_E5", "M365_E5",
+            "ENTERPRISEPREMIUM", "THREAT_INTELLIGENCE"
+        ],
+        "intune": [
+            "INTUNE_A", "INTUNE_P1", "SPB", "M365_BUSINESS_PREMIUM", "SMB_BUSINESS_PREMIUM",
+            "SPE_E3", "SPE_E5", "M365_E3", "M365_E5", "SPE_F3", "M365_F3",
+            "EMS_E3", "EMS_E5", "EMSPREMIUM"
+        ],
+        "entraP1": [
+            "AAD_PREMIUM_P1", "AAD_PREMIUM", "SPB", "M365_BUSINESS_PREMIUM",
+            "SMB_BUSINESS_PREMIUM", "SPE_E3", "SPE_E5", "M365_E3", "M365_E5",
+            "EMS_E3", "EMS_E5"
+        ],
+        "entraP2": [
+            "AAD_PREMIUM_P2", "SPE_E5", "M365_E5", "EMS_E5", "EMSPREMIUM",
+            "IDENTITY_THREAT_PROTECTION"
+        ],
+        "purview": [
+            "SPE_E5", "M365_E5", "ENTERPRISEPREMIUM",
+            "INFORMATION_PROTECTION_COMPLIANCE", "COMPLIANCE_MANAGER_PREMIUM"
+        ]
+    },
+
+    "freeLicensePatterns": [
+        "FREE", "FLOW_FREE", "POWER_BI_STANDARD", "POWER_AUTOMATE_FREE",
+        "POWERAPPS_VIRAL", "TEAMS_EXPLORATORY", "RIGHTSMANAGEMENT_ADHOC",
+        "WINDOWS_STORE", "STREAM", "MICROSOFT_BUSINESS_CENTER",
+        "CCIBOTS_PRIVPREV_VIRAL", "FORMS_PRO", "PROJECT_MADEIRA_PREVIEW_IW",
+        "DEVELOPERPACK", "DYN365_ENTERPRISE_P1_IW", "MEETING_ROOM"
+    ],
+
+    "guestInviteRestrictionMapping": {
+        "_comment": "Maps authorization policy allowInvitesFrom values to points. Values are case-insensitive.",
+        "none": 2,
+        "adminsAndGuestInviters": 2,
+        "adminsGuestInvitersAndAllMembers": 1,
+        "everyone": 0
+    },
+
+    "sharepointSharingMapping": {
+        "_comment": "Maps SharePoint SharingCapability enum to points",
+        "Disabled": 3,
+        "ExistingExternalUserSharingOnly": 2,
+        "ExternalUserSharingOnly": 1,
+        "ExternalUserAndGuestSharing": 0
+    }
+}

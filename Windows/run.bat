@@ -140,7 +140,7 @@ if %NMAP_FOUND% equ 1 (
 )
 echo.
 
-:: Check for PowerShell 7 (required for M365, Zero Trust, and Azure Inventory tabs)
+:: Check for PowerShell 7 (required for M365, Zero Trust, Azure Inventory, and Cyber Risk tabs)
 echo [*] Checking PowerShell 7...
 set PWSH_FOUND=0
 where pwsh >nul 2>&1
@@ -154,7 +154,7 @@ if exist "C:\Program Files\PowerShell\7\pwsh.exe" (
 )
 
 :: PowerShell 7 not found - try to install
-echo [!] PowerShell 7 not found. Required for M365, Zero Trust, and Azure Inventory.
+echo [!] PowerShell 7 not found. Required for M365, Zero Trust, Azure Inventory, and Cyber Risk.
 powershell -Command "Get-Command winget -ErrorAction SilentlyContinue" >nul 2>&1
 if %errorLevel% equ 0 (
     echo [*] Installing PowerShell 7 via winget...
@@ -164,12 +164,12 @@ if %errorLevel% equ 0 (
         set PWSH_FOUND=1
     ) else (
         echo [!] Failed to install PowerShell 7.
-        echo     M365, Zero Trust, and Azure Inventory tabs will not work.
+        echo     M365, Zero Trust, Azure Inventory, and Cyber Risk tabs will not work.
         echo     Install manually: https://aka.ms/powershell-release?tag=stable
     )
 ) else (
     echo [!] winget not available. PowerShell 7 not installed.
-    echo     M365, Zero Trust, and Azure Inventory tabs will not work.
+    echo     M365, Zero Trust, Azure Inventory, and Cyber Risk tabs will not work.
     echo     Install manually: https://aka.ms/powershell-release?tag=stable
 )
 
@@ -178,6 +178,41 @@ if %PWSH_FOUND% equ 1 (
     echo [+] PowerShell 7 ready.
 )
 echo.
+
+:: Install PowerShell modules for M365/Azure/Cyber Risk assessments (if PowerShell 7 is available)
+if %PWSH_FOUND% equ 1 (
+    echo [*] Checking PowerShell modules for M365/Azure/Cyber Risk assessments...
+
+    :: Check and install Microsoft.Graph
+    pwsh -NoProfile -Command "if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) { Write-Host '[*] Installing Microsoft.Graph modules (this may take a few minutes)...'; Install-Module Microsoft.Graph -Scope CurrentUser -Force -AllowClobber } else { Write-Host '[+] Microsoft.Graph modules installed' }"
+
+    :: Check and install ExchangeOnlineManagement
+    pwsh -NoProfile -Command "if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) { Write-Host '[*] Installing ExchangeOnlineManagement...'; Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force } else { Write-Host '[+] ExchangeOnlineManagement installed' }"
+
+    :: Check and install Microsoft.Online.SharePoint.PowerShell (for Cyber Risk SharePoint settings)
+    pwsh -NoProfile -Command "if (-not (Get-Module -ListAvailable -Name Microsoft.Online.SharePoint.PowerShell)) { Write-Host '[*] Installing Microsoft.Online.SharePoint.PowerShell...'; Install-Module Microsoft.Online.SharePoint.PowerShell -Scope CurrentUser -Force } else { Write-Host '[+] Microsoft.Online.SharePoint.PowerShell installed' }"
+
+    :: Check and install AzureResourceInventory (for Azure Inventory tab)
+    pwsh -NoProfile -Command "if (-not (Get-Module -ListAvailable -Name AzureResourceInventory)) { Write-Host '[*] Installing AzureResourceInventory...'; Install-Module AzureResourceInventory -Scope CurrentUser -Force } else { Write-Host '[+] AzureResourceInventory installed' }"
+
+    :: Check and install ImportExcel (for Azure Inventory Excel parsing)
+    pwsh -NoProfile -Command "if (-not (Get-Module -ListAvailable -Name ImportExcel)) { Write-Host '[*] Installing ImportExcel...'; Install-Module ImportExcel -Scope CurrentUser -Force } else { Write-Host '[+] ImportExcel installed' }"
+
+    :: Check and install Az.Accounts (for Azure authentication)
+    pwsh -NoProfile -Command "if (-not (Get-Module -ListAvailable -Name Az.Accounts)) { Write-Host '[*] Installing Az.Accounts...'; Install-Module Az.Accounts -Scope CurrentUser -Force } else { Write-Host '[+] Az.Accounts installed' }"
+
+    :: Check and install Maester (for M365 Assessment security tests)
+    pwsh -NoProfile -Command "if (-not (Get-Module -ListAvailable -Name Maester)) { Write-Host '[*] Installing Maester...'; Install-Module Maester -Scope CurrentUser -Force } else { Write-Host '[+] Maester installed' }"
+
+    :: Check and install ZeroTrustAssessment (for Zero Trust tab)
+    pwsh -NoProfile -Command "if (-not (Get-Module -ListAvailable -Name ZeroTrustAssessment)) { Write-Host '[*] Installing ZeroTrustAssessment...'; Install-Module ZeroTrustAssessment -Scope CurrentUser -Force } else { Write-Host '[+] ZeroTrustAssessment installed' }"
+
+    :: Check and install MicrosoftTeams (for M365 Assessment Teams tests)
+    pwsh -NoProfile -Command "if (-not (Get-Module -ListAvailable -Name MicrosoftTeams)) { Write-Host '[*] Installing MicrosoftTeams...'; Install-Module MicrosoftTeams -Scope CurrentUser -Force -AllowClobber } else { Write-Host '[+] MicrosoftTeams installed' }"
+
+    echo [+] PowerShell modules ready.
+    echo.
+)
 
 :: Run the app
 echo ============================================

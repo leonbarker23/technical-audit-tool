@@ -14,6 +14,7 @@ A comprehensive assessment suite for MSP technical consultants performing IT aud
 | **M365 Assessment** | ✅ Complete | Microsoft 365 tenant assessment with Maester tests, instant HTML reports |
 | **Azure Inventory (ARI)** | ✅ Complete | Azure Resource Inventory with Excel reports, instant HTML summary |
 | **Zero Trust Assessment** | ✅ Complete | Microsoft 365 Zero Trust assessment with instant HTML summary |
+| **Cyber Risk Scorecard** | ✅ Complete | Cyber Risk Score (0-100%) for BTR slide deck, instant HTML scorecard |
 
 ### HTML Reports (All Tabs)
 All assessment tabs generate **instant Python-templated HTML reports**:
@@ -45,6 +46,8 @@ Both Mac and Windows versions share identical functionality. The table below sho
 | `m365assessment.ps1` | PowerShell script for M365 data collection via Graph API + Maester |
 | `zerotrust.ps1` | PowerShell script for Zero Trust data collection via Microsoft Graph |
 | `azureinventory.ps1` | PowerShell script for Azure Resource Inventory via ARI module |
+| `cyberrisk.ps1` | PowerShell script for Cyber Risk Scorecard data collection |
+| `cyberrisk_config.json` | External configuration file for scoring thresholds and SKU mappings |
 | `requirements.txt` | Python dependencies (`flask`) |
 
 ---
@@ -280,6 +283,81 @@ Python-templated report with tables, risk scores, and recommendations:
 
 ---
 
+## Cyber Risk Scorecard
+
+### Overview
+Generates a Cyber Risk Score (0-100%) for the BTR (Business & Technology Review) slide deck. Provides a visual scorecard with category breakdowns, progress bars, and prioritised recommendations.
+
+### Prerequisites
+- **PowerShell 7** — Install on Mac: `brew install powershell`
+- **Microsoft.Graph modules** — Same as M365 Assessment
+- **ExchangeOnlineManagement module** — For DLP and sensitivity label data
+- **Microsoft.Online.SharePoint.PowerShell** — For SharePoint sharing settings (optional)
+- **Microsoft 365 credentials** — Global Reader or Global Admin
+
+### Score Categories & Weights
+
+| Category | Weight | Max Points | Description |
+|----------|--------|------------|-------------|
+| **MFA & Authentication** | 20% | 20 | MFA registration, enforcement method, weak MFA (SMS-only) |
+| **License Security Tier** | 15% | 15 | License type determines available security features |
+| **Microsoft Secure Score** | 15% | 15 | Official Microsoft security posture metric |
+| **Conditional Access** | 15% | 15 | CA policy count, coverage, risk-based policies |
+| **Privileged Access** | 10% | 10 | Global Admin count, PIM usage, role hygiene |
+| **Device Compliance** | 10% | 10 | Intune enrollment, compliance rate, Defender status |
+| **Data Protection (Purview)** | 10% | 10 | DLP policies, sensitivity labels, retention |
+| **External Sharing** | 5% | 5 | SharePoint sharing settings, guest access controls |
+
+### Score Grades
+
+| Score Range | Grade | Description |
+|-------------|-------|-------------|
+| 85-100% | Excellent | Strong security posture, minor improvements possible |
+| 70-84% | Good | Solid foundation, some gaps to address |
+| 50-69% | Needs Improvement | Significant gaps requiring attention |
+| 0-49% | At Risk | Critical security gaps, immediate action required |
+
+### How it works
+1. User enters client name and configures options
+2. Flask executes `cyberrisk.ps1` via PowerShell 7
+3. **Authentication (3 prompts)**:
+   - Microsoft Graph (device code) — all Graph API scopes
+   - Security & Compliance (browser) — for DLP, sensitivity labels
+   - SharePoint Online (browser) — for tenant sharing settings (optional)
+4. **Data collection**:
+   - MFA registration and enforcement status
+   - License SKUs and security capabilities
+   - Microsoft Secure Score
+   - Conditional Access policies
+   - Privileged role assignments and PIM status
+   - Device compliance via Intune
+   - DLP policies and sensitivity labels
+   - SharePoint/guest sharing settings
+5. PowerShell calculates scores using external config (`cyberrisk_config.json`)
+6. Python generates instant HTML scorecard (`CyberRiskTemplatedReport`)
+
+### Options
+- **Skip Defender vulnerability scan** — Faster assessment (unchecked by default)
+- **Skip SharePoint admin** — If no SPO admin access (unchecked by default)
+
+### Configuration
+All scoring thresholds and SKU mappings are in `cyberrisk_config.json`:
+- Scoring thresholds for each category
+- License SKU to name/score mappings
+- Capability SKU lists (Defender, Entra, Intune, Purview)
+- Guest invitation and SharePoint sharing mappings
+
+### Duration
+- Small tenants (<100 users): 3-5 minutes
+- Medium tenants (100-500 users): 5-8 minutes
+- Large tenants (500+ users): 8-12 minutes
+
+### Files Generated
+- `cyberrisk_YYYY-MM-DD_HH-MM.json` — Raw assessment data with scores
+- `cyberrisk_report_YYYY-MM-DD_HH-MM.html` — Styled HTML scorecard
+
+---
+
 ## Input Validation & Security
 
 - **Target field:** Regex-gated to prevent injection
@@ -293,7 +371,7 @@ Python-templated report with tables, risk scores, and recommendations:
 ## UI Layout
 
 - Dark theme with AAG gradient branding
-- Tabbed interface with 4 assessment types
+- Tabbed interface with 5 assessment types
 - Two-panel layout: live log (left) + report (right)
 - Real-time HTML report rendering
 - Download bar with links to generated files
@@ -314,7 +392,7 @@ brew install mono-libgdiplus
 | Package | Purpose |
 |---------|---------|
 | `nmap` | Network scanning for Network Discovery tab |
-| `powershell` | PowerShell 7 for Azure Inventory, M365 Assessment, and Zero Trust scripts |
+| `powershell` | PowerShell 7 for M365 Assessment, Azure Inventory, Zero Trust, and Cyber Risk scripts |
 | `mono-libgdiplus` | GDI+ library for Excel column auto-sizing in ImportExcel module |
 
 #### Python Dependencies
@@ -348,6 +426,21 @@ See `Windows/requirements.txt` for Python packages.
 ---
 
 ## Changelog
+
+### 2026-02-12 (Cyber Risk Scorecard Complete)
+- **Cyber Risk Scorecard tab fully implemented** - New assessment for BTR slide deck
+  - Generates Cyber Risk Score (0-100%) with 8 weighted categories
+  - Categories: MFA & Authentication (20%), License Security Tier (15%), Microsoft Secure Score (15%), Conditional Access (15%), Privileged Access (10%), Device Compliance (10%), Data Protection (10%), External Sharing (5%)
+  - Visual HTML scorecard with circular gauge, progress bars, and recommendations
+  - External config file (`cyberrisk_config.json`) for scoring thresholds and SKU mappings
+- **Fixed Graph API scopes** - Removed invalid scopes (`InformationProtectionPolicy.Read.All`, `SecurityActions.Read.All`)
+- **Fixed report generation bug** - Removed invalid `sum()` on strings in `_section_conclusion()`
+- **Auto-install PowerShell modules** - `cyberrisk.ps1` now auto-installs missing modules (consistent with other scripts)
+- **Windows run.bat enhanced** - Now pre-installs all required PowerShell modules:
+  - Microsoft.Graph, ExchangeOnlineManagement, Microsoft.Online.SharePoint.PowerShell
+  - AzureResourceInventory, ImportExcel, Az.Accounts
+  - Maester, ZeroTrustAssessment, MicrosoftTeams
+- **Authentication clarified** - Graph uses device code; S&C and SharePoint use browser auth (no device code available)
 
 ### 2026-02-12 (Windows Platform Fixes)
 - **Fixed Windows admin check** - Replaced Unix-only `os.geteuid()` with Windows-compatible `ctypes.windll.shell32.IsUserAnAdmin()`

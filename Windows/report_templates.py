@@ -10,6 +10,7 @@ Available report generators:
 - NetworkTemplatedReport: Network discovery scan results
 - AzureTemplatedReport: Azure Resource Inventory assessment
 - ZeroTrustTemplatedReport: Microsoft 365 Zero Trust assessment
+- CyberRiskTemplatedReport: Cyber Risk Scorecard for BTR slide deck
 """
 
 from datetime import datetime
@@ -2945,4 +2946,456 @@ with {failed_count} security findings requiring attention.
 
 <div style="background:linear-gradient(90deg,rgba(232,31,99,0.1),rgba(123,31,162,0.1),rgba(3,155,229,0.1));border:1px solid #30363d;border-radius:6px;padding:16px;margin-top:24px;">
     <p style="margin:0;color:#c9d1d9;font-size:0.9rem;"><strong>Need help implementing Zero Trust?</strong> Our team can assist with Conditional Access deployment, Intune configuration, and security hardening projects.</p>
+</div>'''
+
+
+class CyberRiskTemplatedReport(ReportSection):
+    """Python-templated Cyber Risk Scorecard report generator (HTML output).
+
+    Generates a visual scorecard showing the overall Cyber Risk Score (0-100%)
+    with category breakdowns, progress bars, and prioritised recommendations.
+    Designed for BTR (Business & Technology Review) slide deck integration.
+    """
+
+    # Grade thresholds and colors
+    GRADES = {
+        "Excellent": {"min_score": 85, "color": "#3fb950", "bg": "rgba(63, 185, 80, 0.15)"},
+        "Good": {"min_score": 70, "color": "#56d364", "bg": "rgba(86, 211, 100, 0.15)"},
+        "Needs Improvement": {"min_score": 50, "color": "#d29922", "bg": "rgba(210, 153, 34, 0.15)"},
+        "At Risk": {"min_score": 0, "color": "#f85149", "bg": "rgba(248, 81, 73, 0.15)"},
+    }
+
+    # Category display names and icons
+    CATEGORIES = {
+        "mfaAuthentication": {"name": "MFA & Authentication", "icon": "[KEY]", "max": 20},
+        "licenseTier": {"name": "License Security Tier", "icon": "[LIC]", "max": 15},
+        "secureScore": {"name": "Microsoft Secure Score", "icon": "[SEC]", "max": 15},
+        "conditionalAccess": {"name": "Conditional Access", "icon": "[CA]", "max": 15},
+        "privilegedAccess": {"name": "Privileged Access", "icon": "[ADM]", "max": 10},
+        "deviceCompliance": {"name": "Device Compliance", "icon": "[DEV]", "max": 10},
+        "dataProtection": {"name": "Data Protection", "icon": "[DLP]", "max": 10},
+        "externalSharing": {"name": "External Sharing", "icon": "[EXT]", "max": 5},
+    }
+
+    def __init__(self, assessment_data: dict):
+        """
+        Initialize with Cyber Risk assessment JSON data.
+
+        Args:
+            assessment_data: Complete assessment JSON from cyberrisk.ps1
+        """
+        super().__init__(assessment_data)
+        self.metadata = assessment_data.get("metadata", {})
+        self.scores = assessment_data.get("scores", {})
+        self.breakdown = self.scores.get("breakdown", {})
+        self.mfa = assessment_data.get("mfaAuthentication", {})
+        self.license = assessment_data.get("licenseTier", {})
+        self.secure_score = assessment_data.get("secureScore", {})
+        self.ca = assessment_data.get("conditionalAccess", {})
+        self.priv_access = assessment_data.get("privilegedAccess", {})
+        self.device = assessment_data.get("deviceCompliance", {})
+        self.data_protection = assessment_data.get("dataProtection", {})
+        self.external = assessment_data.get("externalSharing", {})
+        self.recommendations = assessment_data.get("recommendations", [])
+        self.data_gaps = assessment_data.get("dataGaps", [])
+
+    def generate(self, standalone: bool = False) -> str:
+        """
+        Generate the complete HTML report.
+
+        Args:
+            standalone: If True, wrap in full HTML document with styles.
+                       If False, return just the body content (for web UI embedding).
+        """
+        sections = [
+            self._header(),
+            self._section_score_gauge(),
+            self._section_category_breakdown(),
+            self._section_key_findings(),
+            self._section_recommendations(),
+            self._section_data_gaps(),
+            self._section_conclusion()
+        ]
+
+        body = "\n".join([s for s in sections if s])
+
+        if standalone:
+            return self._wrap_standalone(body)
+        return body
+
+    def _wrap_standalone(self, body: str) -> str:
+        """Wrap content in a standalone HTML document."""
+        client = self.metadata.get("clientName", "Unknown")
+        return f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cyber Risk Scorecard - {client}</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            line-height: 1.6;
+            padding: 24px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }}
+        h1, h2, h3 {{ color: #fff; }}
+        a {{ color: #58a6ff; }}
+        table {{ border-collapse: collapse; width: 100%; margin: 12px 0; }}
+        th, td {{ padding: 10px 12px; text-align: left; border-bottom: 1px solid #30363d; }}
+        th {{ background: #161b22; color: #7d8590; font-weight: 600; }}
+        @media print {{
+            body {{ background: #fff; color: #000; }}
+            th {{ background: #f0f0f0; color: #000; }}
+            td {{ color: #333; }}
+        }}
+    </style>
+</head>
+<body>
+{body}
+</body>
+</html>'''
+
+    def _get_grade_info(self, score: int) -> Tuple[str, dict]:
+        """Get grade name and styling info for a given score."""
+        for grade, info in self.GRADES.items():
+            if score >= info["min_score"]:
+                return grade, info
+        return "At Risk", self.GRADES["At Risk"]
+
+    def _header(self) -> str:
+        """Generate report header with branding."""
+        client = self.metadata.get("clientName", "Unknown Client")
+        tenant_name = self.metadata.get("tenantName", "")
+        date = self.metadata.get("assessmentDate", "")[:10] if self.metadata.get("assessmentDate") else ""
+        primary_domain = self.metadata.get("primaryDomain", "")
+
+        tenant_display = f'<span style="color:#7d8590;font-size:0.9rem;">{tenant_name}</span>' if tenant_name else ""
+        domain_display = f'<span style="color:#7d8590;font-size:0.85rem;">({primary_domain})</span>' if primary_domain else ""
+
+        return f'''<div style="border-bottom:3px solid;border-image:linear-gradient(90deg,#e81f63,#7b1fa2,#039be5) 1;padding-bottom:16px;margin-bottom:24px;">
+    <h1 style="margin:0;font-size:1.75rem;color:#fff;">Cyber Risk Scorecard</h1>
+    <p style="margin:8px 0 0;color:#c9d1d9;font-size:1rem;">{client} {domain_display}</p>
+    <p style="margin:4px 0 0;color:#7d8590;font-size:0.9rem;">{date}</p>
+    {tenant_display}
+</div>'''
+
+    def _section_score_gauge(self) -> str:
+        """Generate the main score gauge with overall score."""
+        overall_score = self.scores.get("overall", 0)
+        grade = self.scores.get("grade", "At Risk")
+        grade_name, grade_info = self._get_grade_info(overall_score)
+
+        # Use the grade from the data if available
+        if grade:
+            for g, info in self.GRADES.items():
+                if g.lower() == grade.lower():
+                    grade_name = g
+                    grade_info = info
+                    break
+
+        # Create circular gauge using CSS
+        gauge_color = grade_info["color"]
+        gauge_percentage = min(overall_score, 100)
+
+        return f'''<div style="text-align:center;margin:32px 0;">
+    <div style="position:relative;display:inline-block;width:200px;height:200px;">
+        <!-- Background circle -->
+        <svg viewBox="0 0 200 200" style="transform:rotate(-90deg);">
+            <circle cx="100" cy="100" r="85" fill="none" stroke="#30363d" stroke-width="20"/>
+            <circle cx="100" cy="100" r="85" fill="none" stroke="{gauge_color}" stroke-width="20"
+                    stroke-dasharray="{gauge_percentage * 5.34} 534"
+                    stroke-linecap="round"/>
+        </svg>
+        <!-- Score text overlay -->
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;">
+            <div style="font-size:3rem;font-weight:700;color:{gauge_color};">{overall_score}%</div>
+            <div style="font-size:1rem;color:#7d8590;">Overall Score</div>
+        </div>
+    </div>
+
+    <div style="margin-top:16px;">
+        <span style="display:inline-block;background:{grade_info['bg']};color:{gauge_color};font-weight:700;padding:8px 24px;border-radius:20px;font-size:1.2rem;">{grade_name}</span>
+    </div>
+</div>'''
+
+    def _section_category_breakdown(self) -> str:
+        """Generate category-by-category score breakdown with progress bars."""
+        html_parts = ['''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">Score Breakdown by Category</h2>
+
+<div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px 20px;">''']
+
+        for cat_key, cat_info in self.CATEGORIES.items():
+            cat_data = self.breakdown.get(cat_key, {})
+            score = cat_data.get("score", 0)
+            max_score = cat_data.get("maxScore", cat_info["max"])
+            percentage = cat_data.get("percentage", 0)
+            data_collected = cat_data.get("dataCollected", True)
+
+            # Determine color based on percentage
+            if percentage >= 80:
+                bar_color = "#3fb950"
+            elif percentage >= 60:
+                bar_color = "#56d364"
+            elif percentage >= 40:
+                bar_color = "#d29922"
+            else:
+                bar_color = "#f85149"
+
+            # Show warning if data wasn't collected
+            warning = ""
+            if not data_collected:
+                warning = ' <span style="color:#d29922;font-size:0.75rem;">[Data unavailable]</span>'
+
+            html_parts.append(f'''
+    <div style="margin:14px 0;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <span style="color:#c9d1d9;font-weight:500;">{cat_info["name"]}{warning}</span>
+            <span style="color:{bar_color};font-weight:600;">{score}/{max_score} pts ({percentage}%)</span>
+        </div>
+        <div style="background:#30363d;border-radius:4px;height:10px;overflow:hidden;">
+            <div style="background:{bar_color};width:{percentage}%;height:100%;transition:width 0.3s;"></div>
+        </div>
+    </div>''')
+
+        html_parts.append('</div>')
+
+        return "\n".join(html_parts)
+
+    def _section_key_findings(self) -> str:
+        """Generate key findings summary with details for each category."""
+        html_parts = ['''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">Key Findings</h2>''']
+
+        # MFA & Authentication
+        mfa_pct = self.mfa.get("registrationPercentage", 0)
+        enforcement = self.mfa.get("enforcementMethod", "None detected")
+        passwordless = self.mfa.get("passwordlessUsers", 0)
+        sms_only = self.mfa.get("smsOnlyUsers", 0)
+        total_users = self.mfa.get("totalUsers", 0)
+
+        mfa_color = "#3fb950" if mfa_pct >= 95 else "#d29922" if mfa_pct >= 80 else "#f85149"
+        enforcement_color = "#3fb950" if "all users" in enforcement.lower() else "#d29922" if enforcement != "None detected" else "#f85149"
+
+        html_parts.append(f'''<div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:16px;margin:12px 0;">
+    <h3 style="color:#bc8cff;font-size:1rem;margin:0 0 12px;">MFA & Authentication</h3>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">Registration:</strong> <span style="color:{mfa_color};">{mfa_pct}%</span> of {total_users} users</p>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">Enforcement:</strong> <span style="color:{enforcement_color};">{enforcement}</span></p>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">Passwordless capable:</strong> {passwordless} users</p>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">SMS-only (weak MFA):</strong> <span style="color:{'#f85149' if sms_only > 5 else '#c9d1d9'};">{sms_only} users</span></p>
+</div>''')
+
+        # License Tier
+        primary_license = self.license.get("primaryLicense", "Unknown")
+        has_defender_p1 = self.license.get("hasDefenderP1", False)
+        has_defender_p2 = self.license.get("hasDefenderP2", False)
+        has_entra_p2 = self.license.get("hasEntraP2", False)
+        has_purview = self.license.get("hasPurview", False)
+
+        capabilities = []
+        if has_defender_p2:
+            capabilities.append("Defender P2")
+        elif has_defender_p1:
+            capabilities.append("Defender P1")
+        if has_entra_p2:
+            capabilities.append("Entra P2 (PIM)")
+        if has_purview:
+            capabilities.append("Purview")
+
+        cap_text = ", ".join(capabilities) if capabilities else "Basic security only"
+
+        html_parts.append(f'''<div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:16px;margin:12px 0;">
+    <h3 style="color:#bc8cff;font-size:1rem;margin:0 0 12px;">License Security Tier</h3>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">Primary License:</strong> {primary_license}</p>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">Security Capabilities:</strong> {cap_text}</p>
+</div>''')
+
+        # Conditional Access
+        ca_enabled = self.ca.get("enabledPolicies", 0)
+        ca_total = self.ca.get("totalPolicies", 0)
+        has_risk_signin = self.ca.get("hasRiskBasedSignIn", False)
+        has_risk_user = self.ca.get("hasRiskBasedUser", False)
+        has_device_compliance = self.ca.get("hasDeviceCompliance", False)
+
+        ca_color = "#3fb950" if ca_enabled >= 7 else "#d29922" if ca_enabled >= 3 else "#f85149"
+
+        html_parts.append(f'''<div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:16px;margin:12px 0;">
+    <h3 style="color:#bc8cff;font-size:1rem;margin:0 0 12px;">Conditional Access</h3>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">Policies:</strong> <span style="color:{ca_color};">{ca_enabled}</span> enabled of {ca_total} total</p>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">Risk-based sign-in:</strong> <span style="color:{'#3fb950' if has_risk_signin else '#f85149'};">{'Yes' if has_risk_signin else 'No'}</span></p>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">User risk policy:</strong> <span style="color:{'#3fb950' if has_risk_user else '#f85149'};">{'Yes' if has_risk_user else 'No'}</span></p>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">Device compliance required:</strong> <span style="color:{'#3fb950' if has_device_compliance else '#d29922'};">{'Yes' if has_device_compliance else 'No'}</span></p>
+</div>''')
+
+        # Privileged Access
+        global_admins = self.priv_access.get("globalAdminCount", 0)
+        total_privileged = self.priv_access.get("totalPrivilegedUsers", 0)
+        pim_enabled = self.priv_access.get("pimEnabled", False)
+
+        admin_color = "#3fb950" if 2 <= global_admins <= 4 else "#d29922" if global_admins in [1, 5, 6] else "#f85149"
+
+        html_parts.append(f'''<div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:16px;margin:12px 0;">
+    <h3 style="color:#bc8cff;font-size:1rem;margin:0 0 12px;">Privileged Access</h3>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">Global Administrators:</strong> <span style="color:{admin_color};">{global_admins}</span> (optimal: 2-4)</p>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">Total privileged users:</strong> {total_privileged}</p>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">PIM (just-in-time access):</strong> <span style="color:{'#3fb950' if pim_enabled else '#d29922'};">{'Enabled' if pim_enabled else 'Not configured'}</span></p>
+</div>''')
+
+        # Device Compliance
+        managed_devices = self.device.get("managedDevices", 0)
+        total_devices = self.device.get("totalDevices", 0)
+        enrollment_pct = self.device.get("enrollmentPercentage", 0)
+        compliance_pct = self.device.get("compliancePercentage", 0)
+        defender_deployed = self.device.get("defenderDeployed", False)
+
+        enroll_color = "#3fb950" if enrollment_pct >= 90 else "#d29922" if enrollment_pct >= 50 else "#f85149"
+        comply_color = "#3fb950" if compliance_pct >= 90 else "#d29922" if compliance_pct >= 70 else "#f85149"
+
+        html_parts.append(f'''<div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:16px;margin:12px 0;">
+    <h3 style="color:#bc8cff;font-size:1rem;margin:0 0 12px;">Device Compliance</h3>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">Managed devices:</strong> {managed_devices} of {total_devices} (<span style="color:{enroll_color};">{enrollment_pct}%</span> enrollment)</p>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">Compliance rate:</strong> <span style="color:{comply_color};">{compliance_pct}%</span></p>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">Defender for Endpoint:</strong> <span style="color:{'#3fb950' if defender_deployed else '#d29922'};">{'Deployed' if defender_deployed else 'Not deployed'}</span></p>
+</div>''')
+
+        # Data Protection
+        dlp = self.data_protection.get("dlpPolicies", {})
+        labels = self.data_protection.get("sensitivityLabels", {})
+        retention = self.data_protection.get("retentionPolicies", 0)
+
+        dlp_enabled = dlp.get("enabled", 0)
+        labels_published = labels.get("published", 0)
+        auto_labeling = labels.get("autoLabeling", False)
+
+        html_parts.append(f'''<div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:16px;margin:12px 0;">
+    <h3 style="color:#bc8cff;font-size:1rem;margin:0 0 12px;">Data Protection (Purview)</h3>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">DLP policies:</strong> <span style="color:{'#3fb950' if dlp_enabled >= 3 else '#d29922' if dlp_enabled >= 1 else '#f85149'};">{dlp_enabled} enabled</span></p>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">Sensitivity labels:</strong> <span style="color:{'#3fb950' if labels_published > 0 else '#f85149'};">{labels_published} published</span></p>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">Auto-labeling:</strong> <span style="color:{'#3fb950' if auto_labeling else '#7d8590'};">{'Configured' if auto_labeling else 'Not configured'}</span></p>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">Retention policies:</strong> {retention}</p>
+</div>''')
+
+        # External Sharing
+        sp_sharing = self.external.get("sharepointSharingCapability", "Unknown")
+        guest_restriction = self.external.get("guestInviteRestriction", "Unknown")
+        total_guests = self.external.get("totalGuests", 0)
+
+        sharing_color = "#3fb950" if sp_sharing == "Disabled" else "#d29922" if "Existing" in sp_sharing else "#f85149"
+
+        html_parts.append(f'''<div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:16px;margin:12px 0;">
+    <h3 style="color:#bc8cff;font-size:1rem;margin:0 0 12px;">External Sharing</h3>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">SharePoint sharing:</strong> <span style="color:{sharing_color};">{sp_sharing}</span></p>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">Guest invitation policy:</strong> {guest_restriction}</p>
+    <p style="margin:4px 0;color:#c9d1d9;"><strong style="color:#7d8590;">Total guest users:</strong> {total_guests}</p>
+</div>''')
+
+        return "\n".join(html_parts)
+
+    def _section_recommendations(self) -> str:
+        """Generate recommendations table sorted by priority."""
+        if not self.recommendations:
+            return ""
+
+        html_parts = ['''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">Recommendations</h2>
+
+<p style="color:#7d8590;margin-bottom:12px;">Prioritised actions to improve your Cyber Risk Score:</p>''']
+
+        # Group by priority
+        critical = [r for r in self.recommendations if r.get("priority") == "Critical"]
+        high = [r for r in self.recommendations if r.get("priority") == "High"]
+        medium = [r for r in self.recommendations if r.get("priority") == "Medium"]
+        low = [r for r in self.recommendations if r.get("priority") == "Low"]
+
+        # Build table
+        rows = []
+        for rec in (critical + high + medium + low)[:15]:  # Limit to top 15
+            priority = rec.get("priority", "Medium")
+            priority_color = {
+                "Critical": "#f85149",
+                "High": "#f85149",
+                "Medium": "#d29922",
+                "Low": "#3fb950"
+            }.get(priority, "#7d8590")
+
+            priority_badge = f'<span style="background:rgba({priority_color[1:][:2]}, {priority_color[1:][2:4]}, {priority_color[1:][4:]}, 0.15);color:{priority_color};padding:2px 8px;border-radius:4px;font-weight:600;font-size:0.8rem;">{priority}</span>'
+
+            rows.append([
+                priority_badge,
+                rec.get("category", ""),
+                rec.get("finding", ""),
+                rec.get("recommendation", ""),
+                f'<span style="color:#3fb950;font-weight:600;">{rec.get("impact", "")}</span>'
+            ])
+
+        if rows:
+            table = self.format_table(
+                ["Priority", "Category", "Finding", "Recommendation", "Impact"],
+                rows
+            )
+            html_parts.append(table)
+
+        # Summary counts
+        html_parts.append(f'''<div style="margin-top:16px;padding:12px;background:#161b22;border:1px solid #30363d;border-radius:6px;">
+    <span style="color:#f85149;margin-right:16px;"><strong>{len(critical)}</strong> Critical</span>
+    <span style="color:#f85149;margin-right:16px;"><strong>{len(high)}</strong> High</span>
+    <span style="color:#d29922;margin-right:16px;"><strong>{len(medium)}</strong> Medium</span>
+    <span style="color:#3fb950;"><strong>{len(low)}</strong> Low</span>
+</div>''')
+
+        return "\n".join(html_parts)
+
+    def _section_data_gaps(self) -> str:
+        """Show any data collection gaps/warnings."""
+        if not self.data_gaps:
+            return ""
+
+        gaps_list = "".join([f'<li style="margin:4px 0;">{gap}</li>' for gap in self.data_gaps])
+
+        return f'''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">Data Collection Notes</h2>
+
+<div style="background:rgba(210, 153, 34, 0.1);border:1px solid #d29922;border-radius:6px;padding:16px;">
+    <p style="margin:0 0 8px;color:#d29922;font-weight:600;">[!] Some data could not be collected:</p>
+    <ul style="margin:0;padding-left:20px;color:#c9d1d9;">
+        {gaps_list}
+    </ul>
+    <p style="margin:12px 0 0;color:#7d8590;font-size:0.85rem;">Missing data is scored as zero. Run the assessment with appropriate permissions to collect all metrics.</p>
+</div>'''
+
+    def _section_conclusion(self) -> str:
+        """Generate conclusion with next steps."""
+        overall_score = self.scores.get("overall", 0)
+        grade_name, grade_info = self._get_grade_info(overall_score)
+
+        # Calculate potential improvement from top 5 recommendations
+        try:
+            pot_gain_num = sum([
+                int(r.get("impact", "+0").replace("+", "").split()[0])
+                for r in self.recommendations[:5]
+                if r.get("impact", "").startswith("+")
+            ])
+        except:
+            pot_gain_num = 0
+
+        potential_score = min(100, overall_score + pot_gain_num)
+
+        return f'''<h2 style="color:#fff;font-size:1.25rem;margin:24px 0 16px;padding-bottom:8px;border-bottom:1px solid #30363d;">Conclusion</h2>
+
+<p style="color:#c9d1d9;margin-bottom:12px;">
+Your current Cyber Risk Score is <strong style="color:{grade_info['color']};">{overall_score}%</strong> ({grade_name}).
+</p>
+
+{'<p style="color:#c9d1d9;margin-bottom:12px;">By implementing the top 5 recommendations, you could achieve a score of approximately <strong style="color:#3fb950;">' + str(potential_score) + '%</strong>.</p>' if pot_gain_num > 0 else ''}
+
+<p style="color:#c9d1d9;margin-bottom:12px;"><strong>Recommended Next Steps:</strong></p>
+<ol style="margin:8px 0;padding-left:20px;color:#c9d1d9;">
+    <li>Address Critical and High priority recommendations immediately</li>
+    <li>Review Microsoft Secure Score for additional quick wins</li>
+    <li>Schedule remediation work for Medium priority items</li>
+    <li>Plan quarterly reassessment to track progress</li>
+</ol>
+
+<div style="background:linear-gradient(90deg,rgba(232,31,99,0.1),rgba(123,31,162,0.1),rgba(3,155,229,0.1));border:1px solid #30363d;border-radius:6px;padding:16px;margin-top:24px;">
+    <p style="margin:0;color:#c9d1d9;font-size:0.9rem;"><strong>Need help improving your score?</strong> Our team can assist with security hardening, Conditional Access deployment, and Microsoft 365 optimisation projects.</p>
 </div>'''
