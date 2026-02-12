@@ -349,6 +349,21 @@ See `Windows/requirements.txt` for Python packages.
 
 ## Changelog
 
+### 2026-02-12 (Windows Platform Fixes)
+- **Fixed Windows admin check** - Replaced Unix-only `os.geteuid()` with Windows-compatible `ctypes.windll.shell32.IsUserAnAdmin()`
+- **Fixed Windows Unicode encoding errors** - Replaced emoji characters with ASCII equivalents in `report_templates.py`:
+  - `[OK]` instead of checkmark/green tick emojis
+  - `[!]` instead of warning emojis
+  - `[X]` instead of cross/red X emojis
+  - `[!!]` for immediate action items
+  - `[>]` for strategic initiatives
+  - `GBP` instead of pound sign (£)
+  - Hyphen (-) instead of em-dash (—)
+- **Fixed Windows file encoding** - Added explicit UTF-8 encoding to all file operations in `app.py`:
+  - JSON reads use `encoding="utf-8-sig"` to handle BOM
+  - HTML writes use `encoding="utf-8"`
+- **Fixed double browser open** - Removed duplicate browser launch from `run.bat` (already handled by `app.py`)
+
 ### 2026-02-11 (LLM Integration Removed)
 - **Removed Ollama/LLM integration** — All reports now use pure Python templating
   - Removed `import ollama` and all LLM-related code from `app.py` (both platforms)
